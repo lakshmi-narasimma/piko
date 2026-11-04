@@ -1,0 +1,15 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Dependencies and builds
+node_modules/
+.next/
+out/
+dist/
+coverage/
+
+# OS / editor
+.DS_Store
+*.log

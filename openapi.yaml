@@ -1,0 +1,350 @@
+openapi: 3.1.0
+info:
+  title: Piko API
+  version: 0.1.0
+  description: |
+    Piko makes PayPal the default way AI agents pay, and get paid.
+    Amounts are integer micro-USD encoded as strings ("2000" = $0.002).
+    Keep this spec at 10 operations or fewer (APIMatic free plan).
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:3000
+    description: Local
+  - url: https://{host}
+    description: Hosted (Render)
+    variables:
+      host:
+        default: piko.onrender.com
+security:
+  - agentKey: []
+tags:
+  - name: Gateway
+  - name: Payments
+  - name: Directory
+  - name: Facilitator
+
+paths:
+  /g/{seller}/{path}:
+    get:
+      tags: [Gateway]
+      operationId: gatewayCall
+      summary: Call a seller endpoint through the hosted gateway
+      description: |
+        Without PAYMENT-SIGNATURE (and without X-Piko-Autopay) returns 402 with a challenge.
+        With a valid receipt, proxies to the seller and returns the upstream response.
+        Other HTTP methods behave the same way.
+      security:
+        - {}
+        - agentKey: []
+      parameters:
+        - { name: seller, in: path, required: true, schema: { type: string } }
+        - { name: path, in: path, required: true, schema: { type: string }, description: "Rest of the upstream path" }
+        - name: PAYMENT-SIGNATURE
+          in: header
+          required: false
+          schema: { type: string }
+          description: Receipt from POST /api/pay
+        - name: X-Piko-Autopay
+          in: header
+          required: false
+          schema: { type: boolean }
+          description: With an agent key, pay and call in one request
+      responses:
+        "200":
+          description: Upstream response (any upstream 2xx–4xx is passed through)
+          headers:
+            PAYMENT-RESPONSE:
+              schema: { type: string }
+              description: Base64 settlement record
+        "402":
+          description: Payment required
+          headers:
+            PAYMENT-REQUIRED:
+              schema: { type: string }
+              description: Base64 of the challenge
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Challenge" }
+        "502":
+          description: Upstream failed; the call was refunded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/pay:
+    post:
+      tags: [Payments]
+      operationId: pay
+      summary: Authorise payment for a challenge and get a receipt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nonce]
+              properties:
+                nonce: { type: string }
+      responses:
+        "200":
+          description: Receipt issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Receipt" }
+        "202":
+          description: Approval pending (code approval_pending)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "423": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+
+  /api/approvals/{id}:
+    get:
+      tags: [Payments]
+      operationId: getApproval
+      summary: Poll an approval
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Approval
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Approval" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/directory/search:
+    get:
+      tags: [Directory]
+      operationId: searchDirectory
+      summary: Semantic search over listings, priced for the caller's org
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 10, maximum: 50 } }
+      responses:
+        "200":
+          description: Matching listings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/Listing" }
+
+  /api/wallet:
+    get:
+      tags: [Payments]
+      operationId: getWallet
+      summary: Balance, remaining budgets and frozen state for this key
+      responses:
+        "200":
+          description: Wallet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Wallet" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/facilitator/supported:
+    get:
+      tags: [Facilitator]
+      operationId: facilitatorSupported
+      summary: Schemes and networks Piko settles
+      security: [{}]
+      responses:
+        "200":
+          description: Supported kinds
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kinds:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        x402Version: { type: integer, example: 2 }
+                        scheme: { type: string, example: paypal-ledger }
+                        network: { type: string, example: "paypal:sandbox" }
+
+  /api/facilitator/verify:
+    post:
+      tags: [Facilitator]
+      operationId: facilitatorVerify
+      summary: Check a receipt without consuming it
+      security: [{}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FacilitatorRequest" }
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  isValid: { type: boolean }
+                  invalidReason: { type: string }
+
+  /api/facilitator/settle:
+    post:
+      tags: [Facilitator]
+      operationId: facilitatorSettle
+      summary: Consume a receipt and settle the ledger
+      security: [{}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/FacilitatorRequest"
+                - type: object
+                  properties:
+                    upstreamStatus: { type: integer, description: "5xx refunds the call" }
+      responses:
+        "200":
+          description: Settlement
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settlement" }
+        "410": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    agentKey:
+      type: http
+      scheme: bearer
+      description: Agent key, format pk_agent_<secret>
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    MicroUsd:
+      type: string
+      pattern: "^[0-9]+$"
+      description: Integer micro-USD (1 USD = 1000000)
+
+    PaymentRequirement:
+      type: object
+      required: [scheme, network, maxAmountRequired, asset, payTo, resource, nonce, expiresAt, facilitator]
+      properties:
+        scheme: { type: string, example: paypal-ledger }
+        network: { type: string, example: "paypal:sandbox" }
+        maxAmountRequired: { $ref: "#/components/schemas/MicroUsd" }
+        asset: { type: string, example: USD-micro }
+        payTo: { type: string, description: Seller slug }
+        resource: { type: string, format: uri }
+        description: { type: string }
+        nonce: { type: string }
+        expiresAt: { type: string, format: date-time }
+        facilitator: { type: string, format: uri }
+
+    Challenge:
+      type: object
+      required: [x402Version, accepts]
+      properties:
+        x402Version: { type: integer, example: 2 }
+        accepts:
+          type: array
+          items: { $ref: "#/components/schemas/PaymentRequirement" }
+
+    Receipt:
+      type: object
+      required: [receipt, amount, expiresAt]
+      properties:
+        receipt: { type: string, description: Signed single-use JWT; send as PAYMENT-SIGNATURE }
+        amount: { $ref: "#/components/schemas/MicroUsd" }
+        expiresAt: { type: string, format: date-time }
+
+    Approval:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [pending, approved, denied] }
+        amount: { $ref: "#/components/schemas/MicroUsd" }
+        receipt: { type: string, description: Present once approved }
+
+    Listing:
+      type: object
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        kind: { type: string, enum: [http, mcp] }
+        rating: { type: number }
+        seller: { type: string }
+        endpoints:
+          type: array
+          items:
+            type: object
+            properties:
+              method: { type: string }
+              path: { type: string }
+              description: { type: string }
+              price: { $ref: "#/components/schemas/MicroUsd" }
+              freeQuota: { type: integer }
+
+    Wallet:
+      type: object
+      properties:
+        agentId: { type: string }
+        orgId: { type: string }
+        billing: { type: string, enum: [prepaid, invoiced] }
+        balance: { $ref: "#/components/schemas/MicroUsd" }
+        creditRemaining: { $ref: "#/components/schemas/MicroUsd" }
+        frozen: { type: boolean }
+        budgets:
+          type: array
+          items:
+            type: object
+            properties:
+              scope: { type: string, enum: [org, team, agent, task] }
+              period: { type: string }
+              max: { $ref: "#/components/schemas/MicroUsd" }
+              remaining: { $ref: "#/components/schemas/MicroUsd" }
+
+    FacilitatorRequest:
+      type: object
+      required: [receipt, resource]
+      properties:
+        receipt: { type: string }
+        resource: { type: string, format: uri }
+
+    Settlement:
+      type: object
+      properties:
+        success: { type: boolean }
+        callId: { type: string }
+        amount: { $ref: "#/components/schemas/MicroUsd" }
+        refunded: { type: boolean }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, upstream_failed, not_found]
+            message: { type: string }
+          additionalProperties: true

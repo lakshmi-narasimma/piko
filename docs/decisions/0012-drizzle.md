@@ -8,7 +8,7 @@ DESIGN.md §11 left the ORM open between Drizzle and Prisma. What the choice has
 - The ledger is append-only. Each Call writes three entries in one transaction, and reserving funds must not overdraw under concurrency, so we need `SELECT … FOR UPDATE` or serializable transactions without dropping to raw SQL for every query.
 - Directory search stores embeddings in a pgvector column.
 - One Next.js app on Render's free tier, Postgres on Neon's free tier ([0004](0004-nextjs-monolith-render-neon.md)), with a pooled URL for the app and a direct one for migrations.
-- Claude writes most of the code, so the queries should read like the SQL they run.
+- Queries should read like the SQL they run, so they are easy to review.
 
 ## Decision
 Use **Drizzle ORM** with the **node-postgres (`pg`)** driver and **drizzle-kit** for migrations.

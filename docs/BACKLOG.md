@@ -50,9 +50,9 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** The repo exists, `main` holds every doc, and the labels and milestones exist. *(It goes public with an MIT licence in P9-11.)*
   - **Depends on:** nothing
 
-- [ ] **P0-02 Set up the PayPal sandbox** · `human` `paypal` · M
-  - **Goal:** Complete steps 1–6 of [PAYPAL_SETUP.md](PAYPAL_SETUP.md): the six sandbox accounts and the `piko` REST app with Payouts and Invoicing turned on.
-  - **Done when:** The client id and secret are in `.env.local`, and the checklist items for steps 1–6 are ticked.
+- [x] **P0-02 Set up the PayPal sandbox** · `human` `paypal` · M
+  - **Goal:** Complete steps 1–3 of [PAYPAL_SETUP.md](PAYPAL_SETUP.md): the six sandbox accounts and the `piko` REST app with Payouts and Invoicing turned on. The tunnel and webhook (steps 4–5) moved to P2-05, because they need the running app.
+  - **Done when:** The client id and secret are in `.env.local`, and the checklist items for the accounts and the REST app are ticked.
   - **Depends on:** nothing
 
 - [ ] **P0-03 Get the other keys and the database** · `human` `infra` · S
@@ -187,7 +187,7 @@ Covers TEST_PLAN **F4**.
 - [ ] **P2-05 Webhook endpoint** · `paypal` `core` · M
   - **Goal:** `/api/paypal/webhook` verifies the signature with `PAYPAL_WEBHOOK_ID`, stores each event once in `webhook_events`, and sends it to a handler by type. This task covers `PAYMENT.CAPTURE.COMPLETED`; later phases register more handlers.
   - **Done when:** A replayed webhook credits nothing, and a bad signature gets a 400.
-  - **Depends on:** P2-04, and the webhook from PAYPAL_SETUP.md step 6 (`human`)
+  - **Depends on:** P2-04, and the tunnel and webhook from [PAYPAL_SETUP.md](PAYPAL_SETUP.md) steps 4–5 (`human`, moved here from P0-02). Once the app runs locally, ask the human to do them and put the Webhook ID in `PAYPAL_WEBHOOK_ID`.
 
 - [ ] **P2-06 Wallet screen** · `ui` `paypal` · L
   - **Goal:** The balance, a PayPal JS SDK v6 top-up button that explains a cancelled popup, the budget per task or day, the "notify above" setting, and keys (create, show once, revoke).

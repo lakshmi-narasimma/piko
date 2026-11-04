@@ -1,6 +1,8 @@
 /**
- * Database client and migrations.
+ * Database access through Drizzle ORM over node-postgres (see docs/decisions/0012-drizzle.md).
  *
- * Placeholder: wired up in P0-07.
+ * - `getDb()` is the app's client, on DATABASE_URL_POOLED.
+ * - `runMigrations(url)` applies lib/db/migrations; `npm run db:migrate` runs it on DATABASE_URL.
  */
-export {};
+export { createDb, getDb, type Db } from "./client";
+export { runMigrations } from "./migrate";

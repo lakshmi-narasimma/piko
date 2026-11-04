@@ -7,6 +7,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Resets and migrates the test database once per run (see test/global-setup.ts).
+    globalSetup: ["./test/global-setup.ts"],
     include: ["**/*.test.ts"],
     exclude: ["node_modules/**", ".next/**"],
   },

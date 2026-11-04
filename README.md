@@ -68,6 +68,7 @@ More detail: [docs/DESIGN.md](docs/DESIGN.md) · API: [docs/API.md](docs/API.md)
 1. Requirements: Node 24 LTS or newer (see `.node-version`), npm, a free Neon Postgres database, a PayPal developer account.
 2. Follow [docs/PAYPAL_SETUP.md](docs/PAYPAL_SETUP.md) to create the sandbox accounts and keys.
 3. `cp .env.example .env.local` and fill it in. The app refuses to start if a required value is missing, and names it.
+   - `TEST_DATABASE_URL` must be a separate Postgres with pgvector (for example `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=piko_test pgvector/pgvector:pg17`). `npm test` wipes and re-migrates it on every run. If it isn't set, the database tests are skipped.
 4. Install, set up the database and start the app:
    ```sh
    npm install

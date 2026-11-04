@@ -12,3 +12,4 @@ One file per settled decision and the reason for it. To change a decision, add a
 - [0008. Enforcement is deterministic code; AI only compiles policies](0008-deterministic-enforcement.md)
 - [0009. All money is integer micro-USD](0009-integer-micro-usd.md)
 - [0010. The product is named Piko](0010-name-piko.md)
+- [0012. Drizzle ORM over node-postgres](0012-drizzle.md)

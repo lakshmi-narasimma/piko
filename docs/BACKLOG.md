@@ -45,7 +45,7 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
 
 ## Phase 0: Setup
 
-- [ ] **P0-01 Create the GitHub repo and push the docs** · `human` `infra` · S
+- [x] **P0-01 Create the GitHub repo and push the docs** · `human` `infra` · S
   - **Goal:** A private GitHub repo holding the current docs, with the labels and milestones above created.
   - **Done when:** The repo exists, `main` holds every doc, and the labels and milestones exist. *(It goes public with an MIT licence in P9-11.)*
   - **Depends on:** nothing

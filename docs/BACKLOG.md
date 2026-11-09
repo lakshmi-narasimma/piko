@@ -65,7 +65,7 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** The answer is recorded in [DESIGN.md §19](DESIGN.md#19-open-items).
   - **Depends on:** nothing
 
-- [ ] **P0-05 Confirm the x402 v2 details and the Gemini limits** · `research` `docs` · S
+- [x] **P0-05 Confirm the x402 v2 details and the Gemini limits** · `research` `docs` · S
   - **Goal:** Read the x402-foundation `specs/` for v2 header names, payload shapes and the rules for a custom scheme. Confirm the current Gemini Flash model name, its free-tier limits, and the embedding model.
   - **Done when:** Any differences are fixed in API.md and openapi.yaml, and a decision record `0011` captures the findings.
   - **Depends on:** nothing

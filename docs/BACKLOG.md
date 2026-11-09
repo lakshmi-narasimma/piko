@@ -149,7 +149,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** The facilitator routes in openapi.yaml match the responses, and a test settles a Call through them.
   - **Depends on:** P1-10
 
-- [ ] **P1-12 `X-Piko-Autopay` shortcut** · `core` · S
+- [x] **P1-12 `X-Piko-Autopay` shortcut** · `core` · S
   - **Goal:** With a key and `X-Piko-Autopay: true`, one request runs challenge → pay → forward on the server side.
   - **Done when:** The F2 autopay item passes, and the buyer is charged exactly once.
   - **Depends on:** P1-10

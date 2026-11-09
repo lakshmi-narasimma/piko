@@ -35,7 +35,7 @@ All three headers carry **base64-encoded JSON** (standard base64 of the UTF-8 JS
 
 **CORS:** for browser callers, the gateway exposes `PAYMENT-REQUIRED` and `PAYMENT-RESPONSE` in `Access-Control-Expose-Headers`, allows `PAYMENT-SIGNATURE`, `Content-Type`, `Authorization` and `X-Piko-Autopay` in `Access-Control-Allow-Headers`, and answers the `OPTIONS` preflight without asking for payment.
 
-**Shortcut:** an agent may send its key on the first gateway request with `X-Piko-Autopay: true`. Piko then runs steps 1–3 internally and returns the upstream response directly. The playground agent and the MCP server use this. The three-step flow exists for x402 compatibility and the demo.
+**Shortcut:** an agent may send its key on the first gateway request with `X-Piko-Autopay: true`. Piko then runs steps 1–3 internally and returns the upstream response directly. The playground agent and the MCP server use this. The three-step flow exists for x402 compatibility and the demo. Any error from §4 comes back as that error, for example `402 insufficient_funds`, and nothing is forwarded. Without a Key it returns `401 invalid_key`. A free-allowance Call stays free.
 
 ### Challenge (`PaymentRequired`, the 402)
 ```json

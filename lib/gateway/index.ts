@@ -9,6 +9,7 @@ import { getEnv } from "../env";
 import { jsonError } from "../http";
 import { authenticateRequest, type AuthenticatedAgent } from "../keys";
 import { releaseReservation } from "../ledger";
+import { payErrorResponse, runPayPipeline, type IssuedReceipt } from "../pay";
 import {
   decodeHeaderValue,
   encodeHeaderValue,
@@ -174,6 +175,32 @@ async function servePaidCall(
   }
 }
 
+/**
+ * Runs the whole x402 loop inside one request: Challenge, then the pay pipeline, then the
+ * same verify, forward and settle path a client's own retry takes. It charges once.
+ */
+async function serveAutopay(
+  deps: GatewayDeps,
+  route: GatewayRoute,
+  request: Request,
+  buyer: AuthenticatedAgent,
+): Promise<Response> {
+  const { nonce } = await issueChallenge(deps.db, deps.config, route, buyer);
+
+  let issued: IssuedReceipt;
+  try {
+    issued = await runPayPipeline(deps, request.headers, { nonce });
+  } catch (error) {
+    return payErrorResponse(error);
+  }
+
+  const verified = await verifyPayment(deps, decodeHeaderValue(issued.paymentSignature), {
+    endpointId: route.endpointId,
+  });
+  if (!verified.ok) return paymentRejected(verified);
+  return servePaidCall(deps, route, request, verified.claims);
+}
+
 async function handle(
   deps: GatewayDeps,
   request: Request,
@@ -211,6 +238,11 @@ async function handle(
   if (buyer && route.freeQuota > 0) {
     const callId = await claimFreeCall(db, route, buyer);
     if (callId) return serveFreeCall(deps, route, request, callId);
+  }
+
+  if (request.headers.get(AUTOPAY_HEADER)?.toLowerCase() === "true") {
+    if (!buyer) return jsonError(401, "invalid_key", "X-Piko-Autopay needs an agent Key.");
+    return serveAutopay(deps, route, request, buyer);
   }
 
   const { paymentRequired } = await issueChallenge(db, config, route, buyer);

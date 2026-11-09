@@ -124,7 +124,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** Each one answers directly over HTTP, and Price History returns the same series for the same id every time.
   - **Depends on:** P1-05
 
-- [ ] **P1-07 Minimal seed** · `core` · S
+- [x] **P1-07 Minimal seed** · `core` · S
   - **Goal:** A repeatable `npm run seed` that creates Sam (agent and key), Priya Labs, DataCorp, the four listings and their endpoints, and Priya's $0.94 balance. The full demo world comes in P9-01.
   - **Done when:** Running the seed twice leaves the same state, and it prints Sam's key.
   - **Depends on:** P1-03, P1-04

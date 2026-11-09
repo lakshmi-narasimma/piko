@@ -120,6 +120,8 @@ These follow the spec's facilitator interface (§7 of the core spec), so any x40
 - `POST /api/facilitator/verify` and `POST /api/facilitator/settle` both take `{ "x402Version": 2, "paymentPayload": <PaymentPayload>, "paymentRequirements": <PaymentRequirements> }`.
 - `verify` is **read-only** and returns `{ "isValid": true, "payer": "agent_01J…" }` or `{ "isValid": false, "invalidReason": "challenge_expired", "invalidMessage": "…" }`.
 - `settle` consumes the receipt, writes the ledger entries and returns a `SettlementResponse` (as in §2). A seller calls it only after its handler succeeds (the `authorization` flow). If it never calls it, the reservation is released when the receipt expires, so nothing is charged.
+- A receipt that is expired or already used gets `410 challenge_expired` from `settle` and `isValid: false` from `verify`. Any other failure of `settle` returns 200 with `success: false` and `errorReason` (`invalid_receipt`). A malformed request body gets `400 invalid_request`.
+- Both routes check that `paymentRequirements` and `paymentPayload.accepted` are exactly what the Challenge offered.
 
 ## 4. Errors
 

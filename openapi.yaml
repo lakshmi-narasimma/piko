@@ -212,6 +212,7 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/FacilitatorRequest" }
       responses:
+        "400": { $ref: "#/components/responses/Error" }
         "200":
           description: Verification result
           content:
@@ -240,8 +241,9 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/FacilitatorRequest" }
       responses:
+        "400": { $ref: "#/components/responses/Error" }
         "200":
-          description: Settlement
+          description: Settlement; success is false and errorReason set for a tampered payment
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Settlement" }

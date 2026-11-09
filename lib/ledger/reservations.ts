@@ -153,6 +153,23 @@ export function reserveFunds(db: DbOrTx, input: ReserveFundsInput): Promise<Rese
 }
 
 /**
+ * Ends a Challenge's hold early, for an upstream failure: nothing was charged, so nothing
+ * needs reversing. Writes no Ledger entry. A hold that has already ended stays ended.
+ */
+export async function releaseReservation(db: DbOrTx, nonce: string): Promise<void> {
+  await db
+    .update(challenges)
+    .set({ reservationExpiresAt: now })
+    .where(
+      and(
+        eq(challenges.nonce, nonce),
+        isNull(challenges.consumedAt),
+        gt(challenges.reservationExpiresAt, now),
+      ),
+    );
+}
+
+/**
  * Consumes a Challenge's reservation and posts its Call, atomically. The seller comes
  * from the Challenge's endpoint and the price from its amount, so a caller can't
  * misdirect the money.

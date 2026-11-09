@@ -3,7 +3,7 @@
  * which can stop the payment by throwing a PayError. Phase 5 inserts the breaker, policy
  * and budget steps into PAY_STEPS, between the Challenge lookup and the funds check.
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { challenges, endpoints, listings, orgs } from "../db/schema";
 import { jsonError } from "../http";
@@ -53,8 +53,11 @@ export interface IssuedReceipt {
 
 export interface PayableChallenge extends ChallengeTerms {
   buyerOrgId: string | null;
+  agentId: string | null;
   endpointId: string;
   sellerOrgId: string;
+  consumedAt: Date | null;
+  reservationActive: boolean;
 }
 
 interface PayContext extends PayDeps {
@@ -94,15 +97,19 @@ function asPayError(error: unknown): unknown {
   return error;
 }
 
-async function loadChallenge(db: Db, nonce: string): Promise<PayableChallenge | undefined> {
+/** Reads a Challenge with what paying and verifying it need. Takes no locks. */
+export async function loadChallenge(db: Db, nonce: string): Promise<PayableChallenge | undefined> {
   const [row] = await db
     .select({
       nonce: challenges.nonce,
       amountMicro: challenges.amountMicro,
       expiresAt: challenges.expiresAt,
       buyerOrgId: challenges.buyerOrgId,
+      agentId: challenges.agentId,
       endpointId: challenges.endpointId,
       sellerOrgId: listings.sellerOrgId,
+      consumedAt: challenges.consumedAt,
+      reservationActive: sql<boolean>`coalesce(${challenges.reservedAt} is not null and ${challenges.reservationExpiresAt} > clock_timestamp(), false)`,
       sellerSlug: orgs.slug,
       path: endpoints.pathOrTool,
       listingName: listings.name,

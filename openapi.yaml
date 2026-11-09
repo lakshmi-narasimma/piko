@@ -60,7 +60,7 @@ paths:
               schema: { type: string }
               description: Base64-encoded JSON x402 v2 SettlementResponse (see the Settlement schema)
         "402":
-          description: Payment required
+          description: Payment required, or a PAYMENT-SIGNATURE that failed verification (code invalid_receipt)
           headers:
             PAYMENT-REQUIRED:
               schema: { type: string }
@@ -70,9 +70,10 @@ paths:
               schema: { $ref: "#/components/schemas/Challenge" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
         "423": { $ref: "#/components/responses/Error" }
         "502":
-          description: Upstream failed; the call was refunded
+          description: Upstream failed; nothing was charged
           headers:
             PAYMENT-RESPONSE:
               schema: { type: string }
@@ -421,6 +422,6 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, challenge_buyer_mismatch, upstream_failed, not_found, invalid_request, invalid_amount]
+              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, challenge_buyer_mismatch, upstream_failed, not_found, invalid_request, invalid_amount, invalid_receipt]
             message: { type: string }
           additionalProperties: true

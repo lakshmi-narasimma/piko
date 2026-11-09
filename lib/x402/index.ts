@@ -51,6 +51,16 @@ export interface PaymentPayload {
   payload: { receipt: string };
 }
 
+export interface SettlementResponse {
+  success: boolean;
+  errorReason?: string;
+  errorMessage?: string;
+  transaction: string;
+  network: string;
+  payer?: string;
+  amount?: string;
+}
+
 export interface X402Config {
   appBaseUrl: string;
   network: `paypal:${Env["PAYPAL_ENV"]}`;

@@ -97,7 +97,9 @@ After the upstream response:
   { "success": true, "transaction": "call_01J…", "network": "paypal:sandbox", "payer": "agent_01J…", "amount": "2000" }
   ```
   `transaction` is the Piko Call id (there is no blockchain hash) and `payer` is the agent id.
-- **5xx or timeout (`UPSTREAM_TIMEOUT_MS`):** the Call is **refunded**. The reservation is released (or reversing entries are written), and the agent gets `502 { "error": { "code": "upstream_failed", "refunded": true } }` with a `PAYMENT-RESPONSE` of `{ "success": false, "errorReason": "upstream_failed", "transaction": "", "network": "paypal:sandbox" }`.
+- **5xx or timeout (`UPSTREAM_TIMEOUT_MS`):** nothing settles, so the buyer is not charged. The reservation is released immediately and the agent gets `502 { "error": { "code": "upstream_failed", "refunded": true } }` with a `PAYMENT-RESPONSE` of `{ "success": false, "errorReason": "upstream_failed", "transaction": "", "network": "paypal:sandbox" }`. No Call is recorded yet (P8-01 decides that), and the receipt can't be used again.
+
+**Rejected payments.** A `PAYMENT-SIGNATURE` that fails verification gets `402 invalid_receipt` (malformed, wrong signature, tampered, or not for this endpoint and amount) or `410 challenge_expired` (expired, already used, or its reservation has ended). Neither reaches the seller.
 
 ## 3. Public API (in openapi.yaml)
 

@@ -139,7 +139,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** Tests cover a good payment, an expired challenge, a used challenge and an empty wallet.
   - **Depends on:** P1-08
 
-- [ ] **P1-10 Gateway: verify, forward and settle** · `core` · M
+- [x] **P1-10 Gateway: verify, forward and settle** · `core` · M
   - **Goal:** Read `PAYMENT-SIGNATURE`, verify the receipt (signature, binding, expiry, single use), forward the request upstream with a timeout of `UPSTREAM_TIMEOUT_MS`, write the `calls` row and the ledger entries, and return the `PAYMENT-RESPONSE` header.
   - **Done when:** The F2 items for a paid retry, a reused receipt and a tampered receipt pass.
   - **Depends on:** P1-09, P1-06

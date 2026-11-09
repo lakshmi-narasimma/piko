@@ -33,7 +33,7 @@ Piko speaks x402 v2 over HTTP ([core spec](https://github.com/x402-foundation/x4
 
 All three headers carry **base64-encoded JSON** (standard base64 of the UTF-8 JSON text). The names are the x402 v2 ones, confirmed against the spec: `PAYMENT-REQUIRED` (server → client), `PAYMENT-SIGNATURE` (client → server), `PAYMENT-RESPONSE` (server → client). The v1 names `X-PAYMENT` / `X-PAYMENT-RESPONSE` are not used. Per the spec, the header is the canonical location; the JSON body copy on the 402 is a Piko convenience.
 
-**CORS:** for browser callers, the gateway exposes `PAYMENT-REQUIRED` and `PAYMENT-RESPONSE` in `Access-Control-Expose-Headers`, allows `PAYMENT-SIGNATURE` and `Content-Type` in `Access-Control-Allow-Headers`, and answers the `OPTIONS` preflight without asking for payment.
+**CORS:** for browser callers, the gateway exposes `PAYMENT-REQUIRED` and `PAYMENT-RESPONSE` in `Access-Control-Expose-Headers`, allows `PAYMENT-SIGNATURE`, `Content-Type`, `Authorization` and `X-Piko-Autopay` in `Access-Control-Allow-Headers`, and answers the `OPTIONS` preflight without asking for payment.
 
 **Shortcut:** an agent may send its key on the first gateway request with `X-Piko-Autopay: true`. Piko then runs steps 1–3 internally and returns the upstream response directly. The playground agent and the MCP server use this. The three-step flow exists for x402 compatibility and the demo.
 
@@ -70,7 +70,11 @@ All three headers carry **base64-encoded JSON** (standard base64 of the UTF-8 JS
 - `payTo` is the seller slug. `maxTimeoutSeconds` is required by the spec and equals `RECEIPT_TTL_SECONDS`.
 - Piko-specific fields go in `extra`, which the spec reserves for scheme-specific data: the challenge `nonce`, its `expiresAt`, the `facilitator` base URL and the `payUrl` that issues receipts. `extra.paymentFlow` is omitted, which means the default `authorization` flow (verify → resource → settle).
 
-The price shown is already the buyer org's **enterprise rate** if one exists. Free-allowance calls skip the 402 entirely.
+The price shown is already the buyer org's **enterprise rate** if one exists.
+
+**Free allowance.** A free Call needs the agent's Key on the request, because the Key identifies the buyer. While the buyer org has made fewer free Calls to an endpoint than its quota, the gateway skips the 402, forwards the request and records a `free` Call of amount 0 with no Ledger entries. A free Call whose upstream fails (5xx or timeout) returns `502 upstream_failed` with `refunded: false`, charges nothing, and does not use up the quota.
+
+**Gateway errors.** An unknown seller or route returns `404 not_found`. A Key that is sent but wrong returns `401 invalid_key`, and a frozen agent's Key returns `423 agent_frozen`; a request with no Key gets the 402. A Challenge issued with a Key can only be paid by that same buyer org.
 
 ### Receipt and payment payload
 The receipt is a JWT (HS256, `RECEIPT_SIGNING_SECRET`) with claims `{ nonce, agentId, orgId, sellerId, endpointId, amount, exp }`. It lasts `RECEIPT_TTL_SECONDS` and is **single-use**: settling marks `challenges.consumed_at`, and a second use is rejected.

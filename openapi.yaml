@@ -68,6 +68,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Challenge" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "423": { $ref: "#/components/responses/Error" }
         "502":
           description: Upstream failed; the call was refunded
           headers:

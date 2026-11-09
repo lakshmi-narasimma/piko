@@ -129,7 +129,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** Running the seed twice leaves the same state, and it prints Sam's key.
   - **Depends on:** P1-03, P1-04
 
-- [ ] **P1-08 Gateway: return a 402 challenge** · `core` · M
+- [x] **P1-08 Gateway: return a 402 challenge** · `core` · M
   - **Goal:** Add the route `/g/[seller]/[...path]`. It matches an endpoint, stores a Challenge (nonce, amount, `CHALLENGE_TTL_SECONDS`), and returns 402 with the challenge body and a base64 `PAYMENT-REQUIRED` header ([API.md](API.md)). It also applies the free allowance: the first N calls from a buyer skip the 402.
   - **Done when:** The F2 items for the challenge, its header and the free allowance pass.
   - **Depends on:** P1-07

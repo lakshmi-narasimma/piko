@@ -131,8 +131,18 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 | 403 | `policy_denied` | A policy blocks this vendor or price | `policyId`, `rule` |
 | 202 | `approval_pending` | Needs a human; poll the approval | `approvalId`, `approvalUrl` |
 | 402 | `budget_exceeded` | Agent, team or org budget is used up | `scope`, `remaining` |
-| 402 | `insufficient_funds` | Prepaid balance or org credit limit is too low | `balance` |
 | 410 | `challenge_expired` | Nonce expired or already used | — |
+| 402 | `insufficient_funds` | Prepaid balance or org credit limit is too low | `balance`: micro-USD available |
+
+`/api/pay` also returns these, which are not checks in the order above:
+
+| Status | `code` | Meaning |
+|---|---|---|
+| 400 | `invalid_request` | The body is not JSON with a string `nonce` |
+| 404 | `not_found` | No Challenge has this nonce |
+| 403 | `challenge_buyer_mismatch` | The Challenge was issued with a Key from a different buyer org |
+
+`POST /api/pay` must see the challenge before the funds check, so a stale nonce gets 410 even with an empty wallet.
 
 ## 5. MCP server
 

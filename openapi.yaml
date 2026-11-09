@@ -106,9 +106,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "402": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
         "423": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
@@ -419,6 +421,6 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, upstream_failed, not_found]
+              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, challenge_buyer_mismatch, upstream_failed, not_found, invalid_request, invalid_amount]
             message: { type: string }
           additionalProperties: true

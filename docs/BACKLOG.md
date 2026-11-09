@@ -134,7 +134,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** The F2 items for the challenge, its header and the free allowance pass.
   - **Depends on:** P1-07
 
-- [ ] **P1-09 `POST /api/pay` pipeline** · `core` · M
+- [x] **P1-09 `POST /api/pay` pipeline** · `core` · M
   - **Goal:** Check the key, then funds (§9 steps 1, 5 and 6), then issue the signed single-use Receipt JWT (`RECEIPT_TTL_SECONDS`) and reserve the amount. Build it as an ordered pipeline so Phase 5 can add the breaker, policy and budget steps. Return 410 `challenge_expired` and 402 `insufficient_funds`.
   - **Done when:** Tests cover a good payment, an expired challenge, a used challenge and an empty wallet.
   - **Depends on:** P1-08

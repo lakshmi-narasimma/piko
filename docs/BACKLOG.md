@@ -154,7 +154,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** The F2 autopay item passes, and the buyer is charged exactly once.
   - **Depends on:** P1-10
 
-- [ ] **P1-13 Demo agent script** · `core` · S
+- [x] **P1-13 Demo agent script** · `core` · S
   - **Goal:** `scripts/agent.ts` runs the three-step loop against a running app with Sam's key and prints each step. It doubles as a test and as an example for the README.
   - **Done when:** It completes a paid call to Price History locally, and Sam's balance drops by $0.002.
   - **Depends on:** P1-10

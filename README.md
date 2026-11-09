@@ -77,6 +77,12 @@ More detail: [docs/DESIGN.md](docs/DESIGN.md) · API: [docs/API.md](docs/API.md)
    npm run dev          # http://localhost:3000
    ```
 5. Open http://localhost:3000.
+6. Make a paid Call through the x402 loop. PayPal top-ups aren't built yet, so seed Sam's wallet first, and put the Key the seed prints in `PIKO_AGENT_KEY`:
+   ```sh
+   npm run seed -- --sam-wallet-micro=5000000   # $5.00, for local runs only
+   PIKO_AGENT_KEY=pk_agent_... npm run agent    # 402, then pay, then the paid retry
+   ```
+   `npm run agent` calls Price History (`/g/priya/history`), which needs the sample seller APIs (P1-06) running behind the gateway.
 
 Checks (the same ones CI runs):
 ```sh

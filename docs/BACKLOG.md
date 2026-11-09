@@ -105,7 +105,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** Every F1 test passes, including the random run of 1,000 operations and the test of two concurrent Calls that would overdraw.
   - **Depends on:** P1-01, P1-02
 
-- [ ] **P1-04 Agent keys** · `core` · S
+- [x] **P1-04 Agent keys** · `core` · S
   - **Goal:** Generate `pk_agent_…` keys and store only a hash plus a prefix. Look up an agent from a key, support the optional `X-Piko-Secret`, and return 401 `invalid_key` for a bad key.
   - **Done when:** Tests cover a valid key, a revoked key and an unknown key.
   - **Depends on:** P1-01

@@ -19,6 +19,7 @@ export {
 export { InsufficientFundsError, LedgerError, type LedgerErrorCode } from "./errors";
 export {
   availableFunds,
+  claimReservation,
   releaseReservation,
   reserveFunds,
   settleCall,

@@ -8,7 +8,7 @@ import type { Db } from "../db/client";
 import { getEnv } from "../env";
 import { jsonError } from "../http";
 import { authenticateRequest, type AuthenticatedAgent } from "../keys";
-import { releaseReservation } from "../ledger";
+import { claimReservation, releaseReservation } from "../ledger";
 import { payErrorResponse, runPayPipeline, type IssuedReceipt } from "../pay";
 import {
   decodeHeaderValue,
@@ -39,6 +39,15 @@ import {
 
 export interface GatewayConfig extends X402Config {
   upstreamTimeoutMs: number;
+  /** How long reading the request body may take. Defaults to upstreamTimeoutMs. */
+  bodyTimeoutMs?: number;
+}
+
+/** Extra hold time beyond reading and forwarding, for the database work around them. */
+const SETTLE_MARGIN_SECONDS = 30;
+
+function bodyTimeoutMs(config: GatewayConfig): number {
+  return config.bodyTimeoutMs ?? config.upstreamTimeoutMs;
 }
 
 export interface GatewayDeps {
@@ -76,6 +85,14 @@ function agentFrozen(agent: AuthenticatedAgent): Response {
   });
 }
 
+function bodyTimedOut(): Response {
+  return jsonError(
+    408,
+    "request_timeout",
+    "The request body took too long to arrive. Nothing was charged.",
+  );
+}
+
 function upstreamResponse(result: Extract<UpstreamResult, { ok: true }>): Response {
   // A Response with one of these statuses must not have a body at all, even an empty one.
   const body = [204, 205, 304].includes(result.status) ? null : result.body;
@@ -92,8 +109,12 @@ async function serveFreeCall(
   request: Request,
   callId: string,
 ): Promise<Response> {
-  const body = await readForwardableBody(request);
-  const result = await forwardUpstream(route, request, body, {
+  const body = await readForwardableBody(request, bodyTimeoutMs(config));
+  if (!body.ok) {
+    await releaseFreeCall(db, callId);
+    return bodyTimedOut();
+  }
+  const result = await forwardUpstream(route, request, body.body, {
     timeoutMs: config.upstreamTimeoutMs,
     upstreamSecret: null,
   });
@@ -119,11 +140,6 @@ function paymentRejected(failure: PaymentFailure): Response {
   return jsonError(PAYMENT_STATUS[failure.code], failure.code, failure.message);
 }
 
-// Receipts being served by this process. A second request with the same Receipt is turned
-// away before it reaches the seller, so one Receipt can't cause two upstream calls. Across
-// processes the settle transaction still charges only once.
-const receiptsInFlight = new Set<string>();
-
 function withPaymentResponse(response: Response, settlement: SettlementResponse): Response {
   const headers = new Headers(response.headers);
   headers.set(PAYMENT_RESPONSE_HEADER, encodeHeaderValue(settlement));
@@ -133,6 +149,10 @@ function withPaymentResponse(response: Response, settlement: SettlementResponse)
 /**
  * Forwards a verified payment upstream, then settles: x402's authorization flow.
  * Below a 500 the Call is paid. On a 5xx or timeout nothing is settled and the hold ends.
+ *
+ * Claiming the hold is what admits the request: only one request per Receipt gets past it,
+ * in any process. It also extends the hold to cover reading the body, the upstream call and
+ * settling, so the seller never runs on a hold that has run out.
  */
 async function servePaidCall(
   { db, config }: GatewayDeps,
@@ -140,39 +160,50 @@ async function servePaidCall(
   request: Request,
   claims: ReceiptClaims,
 ): Promise<Response> {
-  if (receiptsInFlight.has(claims.nonce)) {
-    return paymentRejected({ code: "challenge_expired", message: "This Receipt is in use." });
-  }
-  receiptsInFlight.add(claims.nonce);
-  try {
-    const body = await readForwardableBody(request);
-    const result = await forwardUpstream(route, request, body, {
-      timeoutMs: config.upstreamTimeoutMs,
-      upstreamSecret: null,
+  const claimed = await claimReservation(db, {
+    nonce: claims.nonce,
+    agentId: claims.agentId,
+    buyerOrgId: claims.orgId,
+    receiptExp: claims.exp,
+    holdSeconds:
+      Math.ceil((bodyTimeoutMs(config) + config.upstreamTimeoutMs) / 1000) + SETTLE_MARGIN_SECONDS,
+  });
+  if (!claimed) {
+    return paymentRejected({
+      code: "challenge_expired",
+      message: "This Receipt is in use, already used, or its reservation has ended.",
     });
-    if (!result.ok) {
-      await releaseReservation(db, claims.nonce);
-      return withPaymentResponse(
-        jsonError(502, "upstream_failed", "The upstream API failed. Nothing was charged.", {
-          refunded: true,
-        }),
-        {
-          success: false,
-          errorReason: "upstream_failed",
-          transaction: "",
-          network: config.network,
-        },
-      );
-    }
-    const settlement = await settlePayment(db, config, claims, {
-      upstreamStatus: result.status,
-      latencyMs: result.latencyMs,
-    });
-    if (!settlement.ok) return paymentRejected(settlement);
-    return withPaymentResponse(upstreamResponse(result), settlement.response);
-  } finally {
-    receiptsInFlight.delete(claims.nonce);
   }
+
+  const body = await readForwardableBody(request, bodyTimeoutMs(config));
+  if (!body.ok) {
+    await releaseReservation(db, claims.nonce);
+    return bodyTimedOut();
+  }
+  const result = await forwardUpstream(route, request, body.body, {
+    timeoutMs: config.upstreamTimeoutMs,
+    upstreamSecret: null,
+  });
+  if (!result.ok) {
+    await releaseReservation(db, claims.nonce);
+    return withPaymentResponse(
+      jsonError(502, "upstream_failed", "The upstream API failed. Nothing was charged.", {
+        refunded: true,
+      }),
+      {
+        success: false,
+        errorReason: "upstream_failed",
+        transaction: "",
+        network: config.network,
+      },
+    );
+  }
+  const settlement = await settlePayment(db, config, claims, {
+    upstreamStatus: result.status,
+    latencyMs: result.latencyMs,
+  });
+  if (!settlement.ok) return paymentRejected(settlement);
+  return withPaymentResponse(upstreamResponse(result), settlement.response);
 }
 
 /**

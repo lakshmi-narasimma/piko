@@ -91,15 +91,19 @@ The agent does not send the bare JWT. It sends an x402 `PaymentPayload` with the
 `accepted` must equal one of the offered `accepts[]` entries, and the receipt's `nonce` and `amount` must match it.
 
 ### Settlement (`SettlementResponse`, the `PAYMENT-RESPONSE` header)
+Before forwarding, the gateway **claims** the receipt's reservation in one atomic update. Only one request per receipt gets past the claim, across every server process; the others get `410 challenge_expired` and never reach the seller. The claim only matches the hold the receipt was issued for (its `exp` is that hold's expiry, to the second), so a receipt from an earlier hold on the same Challenge is rejected. The claim also extends the hold to cover reading the body, the upstream call and settling, so the seller never runs on a hold that has run out.
+
+The request body must arrive within the body deadline (`UPSTREAM_TIMEOUT_MS`). If it doesn't, nothing is forwarded or charged, the reservation is released as below, and the agent gets `408 request_timeout`. A free Call's slow upload gets the same 408 and does not use up the quota.
+
 After the upstream response:
 - **2xx–4xx:** the Call is **paid**, and the three ledger entries are written in one transaction. The header decodes to:
   ```json
   { "success": true, "transaction": "call_01J…", "network": "paypal:sandbox", "payer": "agent_01J…", "amount": "2000" }
   ```
   `transaction` is the Piko Call id (there is no blockchain hash) and `payer` is the agent id.
-- **5xx or timeout (`UPSTREAM_TIMEOUT_MS`):** nothing settles, so the buyer is not charged. The reservation is released immediately and the agent gets `502 { "error": { "code": "upstream_failed", "refunded": true } }` with a `PAYMENT-RESPONSE` of `{ "success": false, "errorReason": "upstream_failed", "transaction": "", "network": "paypal:sandbox" }`. No Call is recorded yet (P8-01 decides that), and the receipt can't be used again.
+- **5xx or timeout (`UPSTREAM_TIMEOUT_MS`):** nothing settles, so the buyer is not charged. The reservation is released immediately and the agent gets `502 { "error": { "code": "upstream_failed", "refunded": true } }` with a `PAYMENT-RESPONSE` of `{ "success": false, "errorReason": "upstream_failed", "transaction": "", "network": "paypal:sandbox" }`. No Call is recorded yet (P8-01 decides that). Releasing also expires the Challenge, so the receipt can't be used again and `POST /api/pay` for that nonce returns `410 challenge_expired`; to retry, call the endpoint again for a new 402.
 
-**Rejected payments.** A `PAYMENT-SIGNATURE` that fails verification gets `402 invalid_receipt` (malformed, wrong signature, tampered, or not for this endpoint and amount) or `410 challenge_expired` (expired, already used, or its reservation has ended). Neither reaches the seller.
+**Rejected payments.** A `PAYMENT-SIGNATURE` that fails verification gets `402 invalid_receipt` (malformed, wrong signature, tampered, or not for this endpoint and amount) or `410 challenge_expired` (expired, already used, in use by another request, or its reservation has ended). Neither reaches the seller. The `402 invalid_receipt` body is the standard error body (§4), not a Challenge, and has no `PAYMENT-REQUIRED` header.
 
 ## 3. Public API (in openapi.yaml)
 

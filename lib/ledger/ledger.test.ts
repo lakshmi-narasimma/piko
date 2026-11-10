@@ -695,6 +695,94 @@ describe.skipIf(!url)("ledger", () => {
       expect(await availableFunds(db, s.buyerOrgId)).toBe(0n);
     });
 
+    /**
+     * Two payments, each in the caller's own transaction at `isolationLevel`. Both take
+     * their snapshot before either reserves, which is how a stale snapshot overdraws.
+     */
+    async function payInCallerTransactions(
+      isolationLevel: "read committed" | "repeatable read" | "serializable",
+    ) {
+      const s = await createScenario(3000n);
+      const nonces = await Promise.all([
+        createChallenge(s.endpointId, 2000n),
+        createChallenge(s.endpointId, 2000n),
+      ]);
+
+      let arrived = 0;
+      let release!: () => void;
+      const bothHaveSnapshots = new Promise<void>((resolve) => (release = resolve));
+
+      const results = await Promise.allSettled(
+        nonces.map((nonce) =>
+          db.transaction(
+            async (tx) => {
+              await tx.execute(sql`select count(*) from ${ledgerEntries}`);
+              if (++arrived === 2) release();
+              await bothHaveSnapshots;
+              await reserveFunds(tx, {
+                nonce,
+                agentId: s.agentId,
+                buyerOrgId: s.buyerOrgId,
+                ttlSeconds: 60,
+              });
+              return settleCall(tx, { nonce, callId: randomUUID() });
+            },
+            { isolationLevel },
+          ),
+        ),
+      );
+      return { s, results };
+    }
+
+    it("never overdraws when callers pay inside REPEATABLE READ transactions", async () => {
+      const { s, results } = await payInCallerTransactions("repeatable read");
+
+      expect(results.filter((r) => r.status === "fulfilled").length).toBeLessThanOrEqual(1);
+      for (const r of results) {
+        if (r.status === "rejected") {
+          expect(r.reason).toBeInstanceOf(LedgerError);
+          expect((r.reason as LedgerError).code).toBe("unsupported_isolation");
+        }
+      }
+      expect(await wallet(s.buyerOrgId)).toBeGreaterThanOrEqual(0n);
+      expect(await availableFunds(db, s.buyerOrgId)).toBeGreaterThanOrEqual(0n);
+    });
+
+    it("rejects paying inside SERIALIZABLE and settling inside REPEATABLE READ", async () => {
+      const { s, results } = await payInCallerTransactions("serializable");
+
+      expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
+      for (const r of results) {
+        expect((r as PromiseRejectedResult).reason.code).toBe("unsupported_isolation");
+      }
+      expect(await wallet(s.buyerOrgId)).toBe(3000n);
+
+      const nonce = await createChallenge(s.endpointId, 2000n);
+      await reserveFunds(db, {
+        nonce,
+        agentId: s.agentId,
+        buyerOrgId: s.buyerOrgId,
+        ttlSeconds: 60,
+      });
+      expect(
+        await codeOf(
+          db.transaction((tx) => settleCall(tx, { nonce, callId: randomUUID() }), {
+            isolationLevel: "repeatable read",
+          }),
+        ),
+      ).toBe("unsupported_isolation");
+    });
+
+    it("lets exactly one through when callers pay inside READ COMMITTED transactions", async () => {
+      const { s, results } = await payInCallerTransactions("read committed");
+
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      const rejected = results.find((r) => r.status === "rejected");
+      expect(rejected?.reason).toBeInstanceOf(InsufficientFundsError);
+      expect(await wallet(s.buyerOrgId)).toBe(1000n);
+      expect(await seller(s.sellerOrgId)).toBe(1900n);
+    });
+
     it("does not deadlock when two orgs buy from each other", { timeout: 30_000 }, async () => {
       const a = await createOrg();
       const b = await createOrg();

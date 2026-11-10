@@ -12,6 +12,23 @@ import { z } from "zod";
 const required = z.string().min(1);
 const positiveInt = z.coerce.number().int().positive();
 
+// Decision 0011: aliases such as gemini-flash-latest hot-swap without notice, so only
+// pinned ids are accepted.
+const pinnedModelId = z
+  .string()
+  .refine((id) => !id.endsWith("-latest"), "must be a pinned model id, not a -latest alias");
+
+function commaList(value: string): string[] {
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
@@ -34,11 +51,22 @@ const envSchema = z.object({
   NEXT_PUBLIC_PAYPAL_CLIENT_ID: required,
   PAYPAL_DEMO_SHOP_EMAIL: z.email(),
 
-  // AI
+  // AI (see docs/decisions/0011). lib/llm tries GEMINI_MODEL, then each fallback in order,
+  // then Groq when GROQ_API_KEY is set.
   GEMINI_API_KEY: required,
-  GEMINI_MODEL: z.string().default("gemini-flash-latest"),
-  // Optional fallback provider.
+  GEMINI_MODEL: pinnedModelId.default("gemini-3.6-flash"),
+  GEMINI_FALLBACK_MODELS: z
+    .string()
+    .default("gemini-3-flash-preview,gemini-3.5-flash-lite")
+    .transform(commaList)
+    .pipe(z.array(pinnedModelId)),
+  // Changing either of these means re-embedding every listing: vectors from different
+  // models or sizes are not comparable.
+  GEMINI_EMBEDDING_MODEL: z.string().default("gemini-embedding-2"),
+  GEMINI_EMBEDDING_DIMENSIONS: positiveInt.max(3072).default(768),
+  // Optional last fallback. Empty means the chain is Gemini only.
   GROQ_API_KEY: z.string().default(""),
+  GROQ_MODEL: z.string().default("openai/gpt-oss-120b"),
 
   // Sponsor APIs. Optional until the Product Search sample API uses it.
   CHANNEL3_API_KEY: z.string().default(""),
@@ -78,7 +106,8 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   if (!result.success) {
     throw new EnvError(
       result.error.issues.map((issue) => {
-        const name = issue.path.join(".");
+        // The variable is the first path segment; list items add an index after it.
+        const name = String(issue.path[0]);
         return name in present ? `${name}: ${issue.message}` : `${name}: missing`;
       }),
     );

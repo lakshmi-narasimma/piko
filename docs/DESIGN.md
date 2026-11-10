@@ -233,7 +233,17 @@ The admin sees the compiled rule and must click **Confirm** before it takes effe
 | **Directory embeddings** | Directory | Semantic search over listings | — |
 | *(stretch)* Spend analyst | Org console | "Why did costs spike?" chat over spend data | Read-only |
 
-**Model:** `gemini-3.6-flash` (stable, free tier) for text, tool calling and structured output. When it returns 503 or 429, `lib/llm` tries `gemini-3-flash-preview`, then `gemini-3.5-flash-lite`, then Groq. Free-tier quotas are per project **and per model**, so this chain also widens the daily allowance. Embeddings use `gemini-embedding-2` at 768 dimensions. The model ids come from env (`GEMINI_MODEL`, `GEMINI_FALLBACK_MODELS`, `GEMINI_EMBEDDING_MODEL`). Pinned ids are used rather than `-latest` aliases, because `gemini-flash-latest` returned 503 on every try on 2026-11-05. All of this goes through the Vercel AI SDK (`@ai-sdk/google`). See [decision 0011](decisions/0011-x402-v2-and-gemini-model.md) for limits and sources.
+**Model:** `gemini-3.6-flash` (stable, free tier) for text, tool calling and structured output. When it is busy, `lib/llm` tries `gemini-3-flash-preview`, then `gemini-3.5-flash-lite`, then Groq (`openai/gpt-oss-120b`, only if `GROQ_API_KEY` is set). Free-tier quotas are per project **and per model**, so this chain also widens the daily allowance. Embeddings use `gemini-embedding-2` at 768 dimensions. The model ids come from env (`GEMINI_MODEL`, `GEMINI_FALLBACK_MODELS`, `GEMINI_EMBEDDING_MODEL`, `GROQ_MODEL`). Pinned ids are used rather than `-latest` aliases, because `gemini-flash-latest` returned 503 on every try on 2026-11-05; env validation rejects `-latest` ids. All of this goes through the Vercel AI SDK (`ai`, `@ai-sdk/google`, `@ai-sdk/groq`). See [decision 0011](decisions/0011-x402-v2-and-gemini-model.md) for limits and sources.
+
+**How `lib/llm` falls back:**
+- **Busy means** 429, 503, Groq's 498, 500/502/504, 408, 404 (a retired or unknown model id), no HTTP response at all, or no answer within 20 s (for a stream, no response start within 20 s). Google treats 408 and 5xx as transient and suggests switching model on 500, and 0011 saw a retired model return 404, so another model can help in each case.
+- **Not busy:** 400, 401, 403, 422, a reply that fails the zod schema, and an abort by the caller. These are rethrown unchanged, because the next model would fail the same way.
+- **The SDK's own retries are off** (`maxRetries: 0`). Otherwise each model would be retried twice with 2 s and 4 s backoffs before the chain moves on, and a judge would wait for it.
+- **Tool loops are sticky:** once a model answers a step, the later steps of that call start from it.
+- **Streams** fall back only until the response starts. A provider error after that reaches the caller as an `error` part.
+- **When the chain is exhausted,** it throws `AiBusy` (`name: "AiBusy"`, `code: "ai_busy"`, a message safe to show, and `modelsTried`). It carries no prompt, key or provider error text. The UI shows the "AI busy" fallback (TEST_PLAN F9).
+- **Embeddings have no fallback.** Groq has no embeddings, and another model or size would put vectors in a different space. A busy embedding model throws `AiBusy` straight away, and a vector of the wrong size is rejected.
+- **Logs** name the model that answered and why each skipped model was skipped. They never include prompts or keys.
 
 ## 11. Architecture
 

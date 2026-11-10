@@ -90,6 +90,9 @@
 - Model availability changes often (2.5 Flash was retired for new users; 3.5 Flash already routes to 3.6). Recheck the ids before demo day; changing them needs only env vars.
 - Changing the embedding model or dimensions means re-embedding every listing, because vectors from different models are not comparable.
 
+## Note (P1-05, 2026-11-10)
+`lib/llm` applies the fallback rule above more broadly than "503 or 429". It also moves on after 498 (Groq capacity), 500/502/504, 408, 404 (a retired model, such as 2.5 Flash above), a failed connection, or an attempt that takes longer than 20 s. It does not move on after 400, 401, 403, 422 or a schema mismatch. The Groq fallback is `GROQ_MODEL=openai/gpt-oss-120b`: a Groq production model with tool use and strict structured outputs (checked 2026-11-10 on console.groq.com/docs/models and /docs/structured-outputs). Embeddings have no fallback, so that every vector stays in one space. DESIGN.md §10 has the full rules.
+
 ## Sources
 - x402 v2 core spec: <https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md>
 - x402 v2 HTTP transport: <https://github.com/x402-foundation/x402/blob/main/specs/transports-v2/http.md>

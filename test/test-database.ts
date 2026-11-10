@@ -25,9 +25,11 @@ export function resolveDatabaseUrls() {
 }
 
 // Neon's pooled host is the direct host plus "-pooler"; both reach the same database.
+// A URL with no port means Postgres's default, so treat it as 5432. Host names are case-insensitive.
 function databaseIdentity(url: string): string {
   const parsed = new URL(url);
-  return `${parsed.hostname.replace("-pooler", "")}:${parsed.port}${parsed.pathname}`;
+  const host = parsed.hostname.toLowerCase().replace("-pooler", "");
+  return `${host}:${parsed.port || "5432"}${parsed.pathname}`;
 }
 
 /** Tests drop and recreate the schema, so they must never point at the app's database. */

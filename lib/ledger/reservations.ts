@@ -31,6 +31,26 @@ export interface SettledCall extends PostedCall {
 }
 
 /**
+ * The org lock only protects a funds check that reads after the lock is granted. Under
+ * READ COMMITTED each statement takes a fresh snapshot, so it sees what the previous
+ * lock holder committed. Under REPEATABLE READ or SERIALIZABLE the snapshot can predate
+ * that commit, so two reservations would both see the same funds and overdraw the
+ * wallet. Refuse to run there rather than check funds against a stale snapshot.
+ */
+async function assertReadCommitted(tx: Tx) {
+  const { rows } = await tx.execute<{ level: string }>(
+    sql`select current_setting('transaction_isolation') as level`,
+  );
+  const level = rows[0]?.level;
+  if (level !== "read committed") {
+    throw new LedgerError(
+      "unsupported_isolation",
+      `Ledger reservations need READ COMMITTED isolation, but this transaction is ${level}.`,
+    );
+  }
+}
+
+/**
  * Serialises everything that moves an org's available funds.
  *
  * FOR NO KEY UPDATE rather than FOR UPDATE: it excludes other reservers just the same,
@@ -99,15 +119,19 @@ export async function availableFunds(db: DbOrTx, orgId: string): Promise<bigint>
 /**
  * Holds a Challenge's amount against the buyer. Concurrent reservations for one org
  * queue on its row, so together they can't overdraw it. The hold lives on the Challenge
- * and writes no Ledger entry (DESIGN.md section 12).
+ * and writes no Ledger entry (DESIGN.md section 12). It must run at READ COMMITTED, the
+ * Postgres default: inside a caller's REPEATABLE READ or SERIALIZABLE transaction it
+ * throws, because that snapshot could hide a concurrent reservation.
  *
  * @throws InsufficientFundsError when the org can't cover the amount.
  * @throws LedgerError `org_not_found`, `invalid_amount`, `challenge_not_found`,
- *   `challenge_consumed`, `challenge_expired` or `challenge_already_reserved`.
+ *   `challenge_consumed`, `challenge_expired`, `challenge_already_reserved` or
+ *   `unsupported_isolation`.
  */
 export function reserveFunds(db: DbOrTx, input: ReserveFundsInput): Promise<Reservation> {
   const { nonce, agentId, buyerOrgId, ttlSeconds } = input;
   return db.transaction(async (tx) => {
+    await assertReadCommitted(tx);
     const org = await lockOrg(tx, buyerOrgId);
 
     const [challenge] = await lockChallenge(tx, nonce);
@@ -215,11 +239,11 @@ export async function releaseReservation(db: DbOrTx, nonce: string): Promise<voi
 /**
  * Consumes a Challenge's reservation and posts its Call, atomically. The seller comes
  * from the Challenge's endpoint and the price from its amount, so a caller can't
- * misdirect the money.
+ * misdirect the money. Like reserveFunds, it must run at READ COMMITTED.
  *
  * @throws LedgerError `challenge_not_found`, `challenge_consumed`,
- *   `reservation_not_active` (never reserved, or the hold expired) or
- *   `call_already_posted`.
+ *   `reservation_not_active` (never reserved, or the hold expired),
+ *   `call_already_posted` or `unsupported_isolation`.
  */
 export function settleCall(
   db: DbOrTx,
@@ -231,6 +255,8 @@ export function settleCall(
       "reservation_not_active",
       `Challenge ${nonce} has no active reservation.`,
     );
+
+    await assertReadCommitted(tx);
 
     // Take the org lock before the Challenge lock, in the same order as reserveFunds.
     const [peek] = await tx

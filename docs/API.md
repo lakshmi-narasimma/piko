@@ -116,4 +116,8 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 | `POST /api/paypal/webhook` | PayPal events (idempotent on resource id) |
 | `GET /api/stream/calls` | Server-sent events for live call feeds |
 | `POST /api/demo/simulate` | Start or stop simulated traffic (demo mode only) |
-| `/api/demo/sellers/*` | The three sample seller APIs (see SEED_DATA.md) |
+| `GET /api/demo/sellers/product-search/search?q=…` | Product Search sample API; queries Channel3 server-side and returns the fixed monitor fallback when unavailable or empty |
+| `GET /api/demo/sellers/price-history/history?product=…` | Price History sample API; returns 90 deterministic daily points for a product ID |
+| `/api/demo/sellers/*` | Other sample seller APIs (see SEED_DATA.md) |
+
+Product Search returns `{ "products": [...], "source": "channel3" | "fallback" }`. Its Channel3 API key stays server-side. Price History returns `{ "productId": "…", "currency": "USD", "history": [{ "date": "YYYY-MM-DD", "priceMicroUsd": "…" }] }`; the fixed window and integer micro-USD values are deterministic for each product ID.

@@ -60,16 +60,27 @@ paths:
               schema: { type: string }
               description: Base64-encoded JSON x402 v2 SettlementResponse (see the Settlement schema)
         "402":
-          description: Payment required, or a PAYMENT-SIGNATURE that failed verification (code invalid_receipt)
+          description: |
+            Payment required: the body is a Challenge and PAYMENT-REQUIRED is set.
+            Or a PAYMENT-SIGNATURE that failed verification: the body is an Error with
+            code invalid_receipt and there is no PAYMENT-REQUIRED header.
           headers:
             PAYMENT-REQUIRED:
               schema: { type: string }
-              description: Base64-encoded JSON x402 v2 PaymentRequired (the same object as the body)
+              description: Base64-encoded JSON x402 v2 PaymentRequired (the same object as the body). Only with a Challenge body.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Challenge" }
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Challenge" }
+                  - { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "408":
+          description: The request body did not arrive in time (code request_timeout); nothing was forwarded or charged
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "410": { $ref: "#/components/responses/Error" }
         "423": { $ref: "#/components/responses/Error" }
         "502":
@@ -424,6 +435,6 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, challenge_buyer_mismatch, upstream_failed, not_found, invalid_request, invalid_amount, invalid_receipt]
+              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, challenge_buyer_mismatch, upstream_failed, not_found, invalid_request, invalid_amount, invalid_receipt, request_timeout]
             message: { type: string }
           additionalProperties: true

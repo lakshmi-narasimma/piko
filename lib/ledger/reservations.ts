@@ -31,6 +31,26 @@ export interface SettledCall extends PostedCall {
 }
 
 /**
+ * The org lock only protects a funds check that reads after the lock is granted. Under
+ * READ COMMITTED each statement takes a fresh snapshot, so it sees what the previous
+ * lock holder committed. Under REPEATABLE READ or SERIALIZABLE the snapshot can predate
+ * that commit, so two reservations would both see the same funds and overdraw the
+ * wallet. Refuse to run there rather than check funds against a stale snapshot.
+ */
+async function assertReadCommitted(tx: Tx) {
+  const { rows } = await tx.execute<{ level: string }>(
+    sql`select current_setting('transaction_isolation') as level`,
+  );
+  const level = rows[0]?.level;
+  if (level !== "read committed") {
+    throw new LedgerError(
+      "unsupported_isolation",
+      `Ledger reservations need READ COMMITTED isolation, but this transaction is ${level}.`,
+    );
+  }
+}
+
+/**
  * Serialises everything that moves an org's available funds.
  *
  * FOR NO KEY UPDATE rather than FOR UPDATE: it excludes other reservers just the same,
@@ -99,15 +119,19 @@ export async function availableFunds(db: DbOrTx, orgId: string): Promise<bigint>
 /**
  * Holds a Challenge's amount against the buyer. Concurrent reservations for one org
  * queue on its row, so together they can't overdraw it. The hold lives on the Challenge
- * and writes no Ledger entry (DESIGN.md section 12).
+ * and writes no Ledger entry (DESIGN.md section 12). It must run at READ COMMITTED, the
+ * Postgres default: inside a caller's REPEATABLE READ or SERIALIZABLE transaction it
+ * throws, because that snapshot could hide a concurrent reservation.
  *
  * @throws InsufficientFundsError when the org can't cover the amount.
  * @throws LedgerError `org_not_found`, `invalid_amount`, `challenge_not_found`,
- *   `challenge_consumed`, `challenge_expired` or `challenge_already_reserved`.
+ *   `challenge_consumed`, `challenge_expired`, `challenge_already_reserved` or
+ *   `unsupported_isolation`.
  */
 export function reserveFunds(db: DbOrTx, input: ReserveFundsInput): Promise<Reservation> {
   const { nonce, agentId, buyerOrgId, ttlSeconds } = input;
   return db.transaction(async (tx) => {
+    await assertReadCommitted(tx);
     const org = await lockOrg(tx, buyerOrgId);
 
     const [challenge] = await lockChallenge(tx, nonce);
@@ -152,31 +176,74 @@ export function reserveFunds(db: DbOrTx, input: ReserveFundsInput): Promise<Rese
   });
 }
 
+export interface ClaimReservationInput {
+  nonce: string;
+  agentId: string;
+  buyerOrgId: string;
+  /** The Receipt's `exp` claim, in seconds since the epoch. */
+  receiptExp: number;
+  /** How long the hold must last from now: long enough to read, forward and settle. */
+  holdSeconds: number;
+}
+
 /**
- * Ends a Challenge's hold early, for an upstream failure: nothing was charged, so nothing
- * needs reversing. Writes no Ledger entry. A hold that has already ended stays ended.
+ * Starts serving a Receipt: the one atomic step that lets a single request through to the
+ * seller, across processes. Returns false if the hold has ended, belongs to another
+ * Receipt, or is already being served.
+ *
+ * A Receipt's `exp` is its hold's expiry rounded down to a second, so a hold whose expiry
+ * is in [exp, exp + 1s) is the one that Receipt was issued for. Claiming moves the expiry
+ * to at least exp + 1s, and to at least `holdSeconds` from now, so the hold covers the whole
+ * upstream call and the same Receipt can't be claimed twice. A Receipt from an earlier hold
+ * on the same Challenge never matches a later one.
+ */
+export async function claimReservation(db: DbOrTx, input: ClaimReservationInput): Promise<boolean> {
+  const { nonce, agentId, buyerOrgId, receiptExp, holdSeconds } = input;
+  const issuedUntil = sql`to_timestamp(${receiptExp + 1})`;
+  const claimed = await db
+    .update(challenges)
+    .set({
+      reservationExpiresAt: sql`greatest(${now} + make_interval(secs => ${holdSeconds}), ${issuedUntil})`,
+    })
+    .where(
+      and(
+        eq(challenges.nonce, nonce),
+        eq(challenges.agentId, agentId),
+        eq(challenges.buyerOrgId, buyerOrgId),
+        isNotNull(challenges.reservedAt),
+        isNull(challenges.consumedAt),
+        gt(challenges.reservationExpiresAt, now),
+        sql`${challenges.reservationExpiresAt} < ${issuedUntil}`,
+      ),
+    )
+    .returning({ nonce: challenges.nonce });
+  return claimed.length > 0;
+}
+
+/**
+ * Ends a Challenge's hold early, for a Call that failed before settling: nothing was
+ * charged, so nothing needs reversing. Writes no Ledger entry. The Challenge expires too,
+ * so it can't be paid again and its Receipt can never become valid again; the agent asks
+ * for a new 402.
  */
 export async function releaseReservation(db: DbOrTx, nonce: string): Promise<void> {
   await db
     .update(challenges)
-    .set({ reservationExpiresAt: now })
-    .where(
-      and(
-        eq(challenges.nonce, nonce),
-        isNull(challenges.consumedAt),
-        gt(challenges.reservationExpiresAt, now),
-      ),
-    );
+    .set({
+      reservationExpiresAt: sql`least(${challenges.reservationExpiresAt}, ${now})`,
+      expiresAt: sql`least(${challenges.expiresAt}, ${now})`,
+    })
+    .where(and(eq(challenges.nonce, nonce), isNull(challenges.consumedAt)));
 }
 
 /**
  * Consumes a Challenge's reservation and posts its Call, atomically. The seller comes
  * from the Challenge's endpoint and the price from its amount, so a caller can't
- * misdirect the money.
+ * misdirect the money. Like reserveFunds, it must run at READ COMMITTED.
  *
  * @throws LedgerError `challenge_not_found`, `challenge_consumed`,
- *   `reservation_not_active` (never reserved, or the hold expired) or
- *   `call_already_posted`.
+ *   `reservation_not_active` (never reserved, or the hold expired),
+ *   `call_already_posted` or `unsupported_isolation`.
  */
 export function settleCall(
   db: DbOrTx,
@@ -188,6 +255,8 @@ export function settleCall(
       "reservation_not_active",
       `Challenge ${nonce} has no active reservation.`,
     );
+
+    await assertReadCommitted(tx);
 
     // Take the org lock before the Challenge lock, in the same order as reserveFunds.
     const [peek] = await tx

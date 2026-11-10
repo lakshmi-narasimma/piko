@@ -12,7 +12,7 @@ import {
 } from "../../test/gateway-fixtures";
 import { createDb, type Db } from "../db/client";
 import { calls, challenges } from "../db/schema";
-import { availableFunds, balanceOf } from "../ledger";
+import { availableFunds, balanceOf, reserveFunds } from "../ledger";
 import { handlePayRequest, type IssuedReceipt } from "../pay";
 import {
   decodeHeaderValue,
@@ -59,6 +59,7 @@ describe.skipIf(!url)("gateway: paid retry", () => {
       method?: string;
       body?: string;
       query?: string;
+      request?: Request;
     } = {},
   ) {
     const headers: Record<string, string> = init.signature
@@ -66,21 +67,18 @@ describe.skipIf(!url)("gateway: paid retry", () => {
       : {};
     return handleGatewayRequest(
       { db, config: init.config ?? config },
-      gatewayRequest(
-        init.method ?? "GET",
-        `https://piko.test/g/${seller.slug}${seller.path}${init.query ?? ""}`,
-        { headers, body: init.body },
-      ),
+      init.request ??
+        gatewayRequest(
+          init.method ?? "GET",
+          `https://piko.test/g/${seller.slug}${seller.path}${init.query ?? ""}`,
+          { headers, body: init.body },
+        ),
       { seller: seller.slug, path: seller.path.slice(1).split("/") },
     );
   }
 
-  /** Runs the real loop up to a Receipt: 402, then POST /api/pay. */
-  async function paidReceipt(seller: Seller, key: string) {
-    const res = await call(seller);
-    const { accepts } = (await res.json()) as PaymentRequired;
-    const nonce = accepts[0]!.extra.nonce;
-    const payRes = await handlePayRequest(
+  function pay(key: string, nonce: string) {
+    return handlePayRequest(
       { db, config },
       new Request("https://piko.test/api/pay", {
         method: "POST",
@@ -88,8 +86,31 @@ describe.skipIf(!url)("gateway: paid retry", () => {
         body: JSON.stringify({ nonce }),
       }),
     );
+  }
+
+  /** Runs the real loop up to a Receipt: 402, then POST /api/pay. */
+  async function paidReceipt(seller: Seller, key: string, method = "GET") {
+    const res = await call(seller, { method, body: method === "GET" ? undefined : "{}" });
+    const { accepts } = (await res.json()) as PaymentRequired;
+    const nonce = accepts[0]!.extra.nonce;
+    const payRes = await pay(key, nonce);
     expect(payRes.status).toBe(200);
     return { nonce, issued: (await payRes.json()) as IssuedReceipt };
+  }
+
+  /** A request whose body sends one chunk and then stalls, like a slow upload. */
+  function stalledUpload(seller: Seller, signature: string): Request {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"text":'));
+      },
+    });
+    return new Request(`https://piko.test/g/${seller.slug}${seller.path}`, {
+      method: "POST",
+      headers: { "PAYMENT-SIGNATURE": signature, "content-type": "application/json" },
+      body,
+      duplex: "half",
+    } as RequestInit);
   }
 
   const settlementOf = (res: Response) =>
@@ -384,5 +405,160 @@ describe.skipIf(!url)("gateway: paid retry", () => {
 
     expect(res.status).toBe(204);
     expect(settlementOf(res).success).toBe(true);
+  });
+
+  it("forwards exactly once when many requests race with one Receipt", async () => {
+    const seller = await createSeller(db, upstream.url, { method: "POST", path: "/summarise" });
+    const buyer = await createBuyer(db, 10_000n);
+    const { issued } = await paidReceipt(seller, buyer.rawKey, "POST");
+    const before = upstream.requests.length;
+
+    const results = await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        call(seller, {
+          method: "POST",
+          signature: issued.paymentSignature,
+          body: JSON.stringify({ attempt: i }),
+        }),
+      ),
+    );
+
+    const statuses = results.map((res) => res.status);
+    expect(statuses.filter((status) => status === 200)).toHaveLength(1);
+    expect(statuses.filter((status) => status === 410)).toHaveLength(11);
+    expect(upstream.requests.length - before).toBe(1);
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(8_000n);
+  });
+
+  it("forwards exactly once when two gateway processes get the same Receipt", async () => {
+    upstream.respond((_req, res) => {
+      setTimeout(() => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      }, 300);
+    });
+    const seller = await createSeller(db, upstream.url, { method: "POST", path: "/summarise" });
+    const buyer = await createBuyer(db, 10_000n);
+    const { issued } = await paidReceipt(seller, buyer.rawKey, "POST");
+    // A fresh copy of the module shares nothing in memory, like a second server process.
+    vi.resetModules();
+    const other = await import("./index");
+    const before = upstream.requests.length;
+
+    const request = () =>
+      gatewayRequest("POST", `https://piko.test/g/${seller.slug}${seller.path}`, {
+        headers: { "PAYMENT-SIGNATURE": issued.paymentSignature },
+        body: '{"text":"hello"}',
+      });
+    const params = { seller: seller.slug, path: seller.path.slice(1).split("/") };
+    const results = await Promise.all([
+      handleGatewayRequest({ db, config }, request(), params),
+      other.handleGatewayRequest({ db, config }, request(), params),
+    ]);
+
+    expect(results.map((res) => res.status).sort()).toEqual([200, 410]);
+    expect(upstream.requests.length - before).toBe(1);
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(8_000n);
+  });
+
+  it("does not let a Challenge be paid again after an upstream failure", async () => {
+    upstream.respond((_req, res) => {
+      res.writeHead(500);
+      res.end("boom");
+    });
+    const seller = await createSeller(db, upstream.url);
+    const buyer = await createBuyer(db, 10_000n);
+    const { nonce, issued } = await paidReceipt(seller, buyer.rawKey);
+    expect((await call(seller, { signature: issued.paymentSignature })).status).toBe(502);
+    upstream.respond((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    const before = upstream.requests.length;
+
+    const repay = await pay(buyer.rawKey, nonce);
+    expect(repay.status).toBe(410);
+    expect(await errorOf(repay)).toMatchObject({ code: "challenge_expired" });
+
+    const reused = await call(seller, { signature: issued.paymentSignature });
+    expect(reused.status).toBe(410);
+    expect(upstream.requests.length).toBe(before);
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+    expect(await availableFunds(db, buyer.orgId)).toBe(10_000n);
+  });
+
+  it("rejects a Receipt from an earlier hold once the Challenge is reserved again", async () => {
+    const seller = await createSeller(db, upstream.url);
+    const buyer = await createBuyer(db, 10_000n);
+    const { nonce, issued } = await paidReceipt(seller, buyer.rawKey);
+    // The first hold ends without settling, then the same Challenge is reserved again.
+    await db
+      .update(challenges)
+      .set({ reservationExpiresAt: sql`clock_timestamp() - interval '1 second'` })
+      .where(eq(challenges.nonce, nonce));
+    await reserveFunds(db, {
+      nonce,
+      agentId: buyer.agentId,
+      buyerOrgId: buyer.orgId,
+      ttlSeconds: config.receiptTtlSeconds * 2,
+    });
+    const before = upstream.requests.length;
+
+    const res = await call(seller, { signature: issued.paymentSignature });
+
+    expect(res.status).toBe(410);
+    expect(await errorOf(res)).toMatchObject({ code: "challenge_expired" });
+    expect(upstream.requests.length).toBe(before);
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+  });
+
+  it("gives up on a slow upload without calling upstream, and releases the hold", async () => {
+    const seller = await createSeller(db, upstream.url, { method: "POST", path: "/summarise" });
+    const buyer = await createBuyer(db, 10_000n);
+    const { issued } = await paidReceipt(seller, buyer.rawKey, "POST");
+    const before = upstream.requests.length;
+
+    const res = await call(seller, {
+      request: stalledUpload(seller, issued.paymentSignature),
+      config: { ...config, bodyTimeoutMs: 200 },
+    });
+
+    expect(res.status).toBe(408);
+    expect(await errorOf(res)).toMatchObject({ code: "request_timeout" });
+    expect(upstream.requests.length).toBe(before);
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+    expect(await availableFunds(db, buyer.orgId)).toBe(10_000n);
+    const retry = await call(seller, {
+      method: "POST",
+      signature: issued.paymentSignature,
+      body: "{}",
+    });
+    expect(retry.status).toBe(410);
+    expect(upstream.requests.length).toBe(before);
+  });
+
+  it("still settles when the upstream outlasts the Receipt's original hold", async () => {
+    upstream.respond((_req, res) => {
+      setTimeout(() => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      }, 1_500);
+    });
+    const seller = await createSeller(db, upstream.url);
+    const buyer = await createBuyer(db, 10_000n);
+    const { nonce, issued } = await paidReceipt(seller, buyer.rawKey);
+    // Leave the hold one second, shorter than the upstream takes.
+    await db
+      .update(challenges)
+      .set({ reservationExpiresAt: sql`clock_timestamp() + interval '1 second'` })
+      .where(eq(challenges.nonce, nonce));
+
+    const res = await call(seller, { signature: issued.paymentSignature });
+
+    expect(res.status).toBe(200);
+    expect(settlementOf(res).success).toBe(true);
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(8_000n);
+    const [row] = await db.select().from(calls).where(eq(calls.nonce, nonce));
+    expect(row).toMatchObject({ status: "paid" });
   });
 });

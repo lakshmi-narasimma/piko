@@ -9,7 +9,8 @@ export type LedgerErrorCode =
   | "challenge_expired"
   | "challenge_consumed"
   | "challenge_already_reserved"
-  | "reservation_not_active";
+  | "reservation_not_active"
+  | "unsupported_isolation";
 
 /** An expected failure of a Ledger operation. Branch on `code`. */
 export class LedgerError extends Error {

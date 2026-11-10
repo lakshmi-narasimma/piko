@@ -269,6 +269,37 @@ describe.skipIf(!url)("gateway: challenge and free allowance", () => {
     await failing.close();
   });
 
+  it("gives up on a slow upload for a free Call, without calling upstream", async () => {
+    const seller = await createSeller(db, upstream.url, {
+      freeQuota: 1,
+      method: "POST",
+      path: "/summarise",
+    });
+    const buyer = await createBuyer(db);
+    const before = upstream.requests.length;
+    const stalled = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"text":'));
+      },
+    });
+
+    const res = await handleGatewayRequest(
+      { db, config: { ...TEST_GATEWAY_CONFIG, bodyTimeoutMs: 200 } },
+      new Request(`https://piko.test/g/${seller.slug}${seller.path}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${buyer.rawKey}` },
+        body: stalled,
+        duplex: "half",
+      } as RequestInit),
+      { seller: seller.slug, path: seller.path.slice(1).split("/") },
+    );
+
+    expect(res.status).toBe(408);
+    await expect(res.json()).resolves.toMatchObject({ error: { code: "request_timeout" } });
+    expect(upstream.requests.length).toBe(before);
+    expect(await free(seller.endpointId, buyer.orgId)).toHaveLength(0);
+  });
+
   it("never forwards the agent's Key or a caller-chosen X-Piko-Secret upstream", async () => {
     const seller = await createSeller(db, upstream.url, { freeQuota: 1 });
     const buyer = await createBuyer(db);

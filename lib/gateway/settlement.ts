@@ -89,6 +89,12 @@ export async function verifyPayment(
   if (expect.endpointId !== undefined && expect.endpointId !== claims.endpointId) {
     return invalid("This Receipt is for a different endpoint.");
   }
+
+  // Before comparing `accepted`: releasing a failed attempt also expires the Challenge,
+  // which changes what it offers, and that Receipt should read as used, not invalid.
+  if (challenge.consumedAt) return expired("This Receipt has already been used.");
+  if (!challenge.reservationActive) return expired("This Receipt's reservation has ended.");
+
   const offered = buildRequirements(config, challenge);
   if (!isDeepStrictEqual(payload.data.accepted, offered)) {
     return invalid("PaymentPayload.accepted is not what the Challenge offered.");
@@ -96,9 +102,6 @@ export async function verifyPayment(
   if (expect.requirements !== undefined && !isDeepStrictEqual(expect.requirements, offered)) {
     return invalid("paymentRequirements is not what the Challenge offered.");
   }
-
-  if (challenge.consumedAt) return expired("This Receipt has already been used.");
-  if (!challenge.reservationActive) return expired("This Receipt's reservation has ended.");
 
   return { ok: true, claims, challenge };
 }

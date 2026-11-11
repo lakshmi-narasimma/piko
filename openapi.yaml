@@ -44,7 +44,9 @@ paths:
           in: header
           required: false
           schema: { type: string }
-          description: Receipt from POST /api/pay
+          description: |
+            Base64-encoded JSON x402 v2 PaymentPayload whose payload is { receipt }.
+            POST /api/pay returns it ready-made as paymentSignature.
         - name: X-Piko-Autopay
           in: header
           required: false
@@ -56,18 +58,22 @@ paths:
           headers:
             PAYMENT-RESPONSE:
               schema: { type: string }
-              description: Base64 settlement record
+              description: Base64-encoded JSON x402 v2 SettlementResponse (see the Settlement schema)
         "402":
           description: Payment required
           headers:
             PAYMENT-REQUIRED:
               schema: { type: string }
-              description: Base64 of the challenge
+              description: Base64-encoded JSON x402 v2 PaymentRequired (the same object as the body)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Challenge" }
         "502":
-          description: Upstream failed; the call was refunded
+          description: Upstream failed; the reservation was released and nothing was charged (Call marked refunded)
+          headers:
+            PAYMENT-RESPONSE:
+              schema: { type: string }
+              description: Base64 SettlementResponse with success false and errorReason upstream_failed
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -165,21 +171,34 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [kinds, extensions, signers]
                 properties:
                   kinds:
                     type: array
                     items:
                       type: object
+                      required: [x402Version, scheme, network]
                       properties:
                         x402Version: { type: integer, example: 2 }
                         scheme: { type: string, example: paypal-ledger }
                         network: { type: string, example: "paypal:sandbox" }
+                        extra: { type: object, additionalProperties: true }
+                  extensions:
+                    type: array
+                    items: { type: string }
+                    description: Extension identifiers Piko implements (none yet)
+                  signers:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items: { type: string }
+                    description: CAIP-2 pattern to signer addresses; empty because nothing is signed on-chain
 
   /api/facilitator/verify:
     post:
       tags: [Facilitator]
       operationId: facilitatorVerify
-      summary: Check a receipt without consuming it
+      summary: Check a payment without consuming it (read-only)
       security: [{}]
       requestBody:
         required: true
@@ -193,26 +212,27 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [isValid]
                 properties:
                   isValid: { type: boolean }
-                  invalidReason: { type: string }
+                  invalidReason: { type: string, description: "Machine-readable code, e.g. challenge_expired" }
+                  invalidMessage: { type: string }
+                  payer: { type: string, description: Agent id }
 
   /api/facilitator/settle:
     post:
       tags: [Facilitator]
       operationId: facilitatorSettle
       summary: Consume a receipt and settle the ledger
+      description: |
+        Call only after the protected handler succeeded (x402 authorization flow).
+        If settle is never called, the reservation is released when the receipt expires.
       security: [{}]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              allOf:
-                - $ref: "#/components/schemas/FacilitatorRequest"
-                - type: object
-                  properties:
-                    upstreamStatus: { type: integer, description: "5xx refunds the call" }
+            schema: { $ref: "#/components/schemas/FacilitatorRequest" }
       responses:
         "200":
           description: Settlement
@@ -241,35 +261,78 @@ components:
       pattern: "^[0-9]+$"
       description: Integer micro-USD (1 USD = 1000000)
 
+    ResourceInfo:
+      type: object
+      description: x402 v2 ResourceInfo
+      required: [url]
+      properties:
+        url: { type: string, format: uri }
+        description: { type: string }
+        mimeType: { type: string }
+        serviceName: { type: string, maxLength: 32 }
+        tags:
+          type: array
+          maxItems: 5
+          items: { type: string, maxLength: 32 }
+        iconUrl: { type: string, format: uri }
+
     PaymentRequirement:
       type: object
-      required: [scheme, network, maxAmountRequired, asset, payTo, resource, nonce, expiresAt, facilitator]
+      description: x402 v2 PaymentRequirements for the paypal-ledger scheme
+      required: [scheme, network, amount, asset, payTo, maxTimeoutSeconds, extra]
       properties:
         scheme: { type: string, example: paypal-ledger }
-        network: { type: string, example: "paypal:sandbox" }
-        maxAmountRequired: { $ref: "#/components/schemas/MicroUsd" }
-        asset: { type: string, example: USD-micro }
+        network: { type: string, example: "paypal:sandbox", description: "CAIP-2 style namespace:reference" }
+        amount: { $ref: "#/components/schemas/MicroUsd" }
+        asset: { type: string, example: USD, description: "ISO 4217 code; amount is in micro-units (extra.decimals: 6), not cents as in the cloudflare:402 precedent" }
         payTo: { type: string, description: Seller slug }
-        resource: { type: string, format: uri }
-        description: { type: string }
-        nonce: { type: string }
-        expiresAt: { type: string, format: date-time }
-        facilitator: { type: string, format: uri }
+        maxTimeoutSeconds: { type: integer, example: 60 }
+        extra:
+          type: object
+          description: Scheme-specific fields for paypal-ledger
+          required: [decimals, nonce, expiresAt, facilitator, payUrl]
+          properties:
+            decimals: { type: integer, enum: [6] }
+            nonce: { type: string }
+            expiresAt: { type: string, format: date-time }
+            facilitator: { type: string, format: uri }
+            payUrl: { type: string, format: uri, description: POST here with the nonce to get a receipt }
+          additionalProperties: true
 
     Challenge:
       type: object
-      required: [x402Version, accepts]
+      description: x402 v2 PaymentRequired
+      required: [x402Version, resource, accepts]
       properties:
-        x402Version: { type: integer, example: 2 }
+        x402Version: { type: integer, enum: [2] }
+        error: { type: string }
+        resource: { $ref: "#/components/schemas/ResourceInfo" }
         accepts:
           type: array
           items: { $ref: "#/components/schemas/PaymentRequirement" }
+        extensions: { type: object, additionalProperties: true }
+
+    PaymentPayload:
+      type: object
+      description: x402 v2 PaymentPayload; sent base64-encoded in PAYMENT-SIGNATURE
+      required: [x402Version, accepted, payload]
+      properties:
+        x402Version: { type: integer, enum: [2] }
+        resource: { $ref: "#/components/schemas/ResourceInfo" }
+        accepted: { $ref: "#/components/schemas/PaymentRequirement" }
+        payload:
+          type: object
+          required: [receipt]
+          properties:
+            receipt: { type: string, description: Signed single-use JWT from POST /api/pay }
+        extensions: { type: object, additionalProperties: true }
 
     Receipt:
       type: object
-      required: [receipt, amount, expiresAt]
+      required: [receipt, paymentSignature, amount, expiresAt]
       properties:
-        receipt: { type: string, description: Signed single-use JWT; send as PAYMENT-SIGNATURE }
+        receipt: { type: string, description: Signed single-use JWT }
+        paymentSignature: { type: string, description: Base64 PaymentPayload wrapping the receipt; send as the PAYMENT-SIGNATURE header }
         amount: { $ref: "#/components/schemas/MicroUsd" }
         expiresAt: { type: string, format: date-time }
 
@@ -322,18 +385,26 @@ components:
 
     FacilitatorRequest:
       type: object
-      required: [receipt, resource]
+      description: x402 v2 facilitator /verify and /settle request
+      required: [x402Version, paymentPayload, paymentRequirements]
       properties:
-        receipt: { type: string }
-        resource: { type: string, format: uri }
+        x402Version: { type: integer, enum: [2] }
+        paymentPayload: { $ref: "#/components/schemas/PaymentPayload" }
+        paymentRequirements: { $ref: "#/components/schemas/PaymentRequirement" }
 
     Settlement:
       type: object
+      description: x402 v2 SettlementResponse
+      required: [success, transaction, network]
       properties:
         success: { type: boolean }
-        callId: { type: string }
+        errorReason: { type: string, description: "Present on failure, e.g. upstream_failed or challenge_expired" }
+        errorMessage: { type: string }
+        transaction: { type: string, description: Piko Call id; empty string when nothing was settled }
+        network: { type: string, example: "paypal:sandbox" }
+        payer: { type: string, description: Agent id }
         amount: { $ref: "#/components/schemas/MicroUsd" }
-        refunded: { type: boolean }
+        extensions: { type: object, additionalProperties: true }
 
     Error:
       type: object

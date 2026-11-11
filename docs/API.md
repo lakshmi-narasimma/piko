@@ -15,51 +15,86 @@ Amounts are always **integer micro-USD as strings** (`"2000"` = $0.002), so Java
 | Dashboard | Session cookie (persona switcher in demo mode, email + password otherwise). |
 | PayPal webhooks | PayPal signature, checked with `PAYPAL_WEBHOOK_ID` through PayPal's verify-webhook-signature API. |
 
-## 2. The paid-call flow (x402 style)
+## 2. The paid-call flow (x402 v2)
+
+Piko speaks x402 v2 over HTTP ([core spec](https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md), [HTTP transport](https://github.com/x402-foundation/x402/blob/main/specs/transports-v2/http.md)) with its own scheme `paypal-ledger` on network `paypal:sandbox`. The reasons and sources are in [decision 0011](decisions/0011-x402-v2-and-gemini-model.md).
 
 ```
 1. Agent → GET /g/{seller}/{path}            (no payment header)
-   ← 402  PAYMENT-REQUIRED: <base64 challenge>  + same challenge as JSON body
+   ← 402  PAYMENT-REQUIRED: base64(PaymentRequired)  + the same object as the JSON body
 
 2. Agent → POST /api/pay  { nonce }          (Authorization: agent key)
-   ← 200 { receipt }                          or an error from §4
+   ← 200 { receipt, paymentSignature, … }     or an error from §4
 
-3. Agent → GET /g/{seller}/{path}  PAYMENT-SIGNATURE: <receipt>
-   Piko verifies + consumes the receipt, forwards upstream, settles the ledger
-   ← upstream status + body, PAYMENT-RESPONSE: <base64 settlement>
+3. Agent → GET /g/{seller}/{path}  PAYMENT-SIGNATURE: base64(PaymentPayload)
+   Piko verifies the receipt, forwards upstream, then settles the ledger and consumes the receipt
+   ← upstream status + body, PAYMENT-RESPONSE: base64(SettlementResponse)
 ```
 
-Header names follow x402 v2 (`PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE`, `PAYMENT-RESPONSE`). Check them against the x402-foundation spec when implementing; if they differ, the spec wins and this doc gets updated.
+All three headers carry **base64-encoded JSON** (standard base64 of the UTF-8 JSON text). The names are the x402 v2 ones, confirmed against the spec: `PAYMENT-REQUIRED` (server → client), `PAYMENT-SIGNATURE` (client → server), `PAYMENT-RESPONSE` (server → client). The v1 names `X-PAYMENT` / `X-PAYMENT-RESPONSE` are not used. Per the spec, the header is the canonical location; the JSON body copy on the 402 is a Piko convenience.
+
+**CORS:** for browser callers, the gateway exposes `PAYMENT-REQUIRED` and `PAYMENT-RESPONSE` in `Access-Control-Expose-Headers`, allows `PAYMENT-SIGNATURE` and `Content-Type` in `Access-Control-Allow-Headers`, and answers the `OPTIONS` preflight without asking for payment.
 
 **Shortcut:** an agent may send its key on the first gateway request with `X-Piko-Autopay: true`. Piko then runs steps 1–3 internally and returns the upstream response directly. The playground agent and the MCP server use this. The three-step flow exists for x402 compatibility and the demo.
 
-### Challenge (the 402 body)
+### Challenge (`PaymentRequired`, the 402)
 ```json
 {
   "x402Version": 2,
+  "error": "PAYMENT-SIGNATURE header is required",
+  "resource": {
+    "url": "https://<app>/g/priya/history",
+    "description": "Price history for one product",
+    "mimeType": "application/json",
+    "serviceName": "Price History"
+  },
   "accepts": [{
     "scheme": "paypal-ledger",
     "network": "paypal:sandbox",
-    "maxAmountRequired": "2000",
-    "asset": "USD-micro",
+    "amount": "2000",
+    "asset": "USD",
     "payTo": "priya",
-    "resource": "https://<app>/g/priya/history",
-    "description": "Price history for one product",
-    "nonce": "c_01J…",
-    "expiresAt": "2026-11-10T12:00:30Z",
-    "facilitator": "https://<app>/api/facilitator"
+    "maxTimeoutSeconds": 60,
+    "extra": {
+      "decimals": 6,
+      "nonce": "c_01J…",
+      "expiresAt": "2026-11-10T12:00:30Z",
+      "facilitator": "https://<app>/api/facilitator",
+      "payUrl": "https://<app>/api/pay"
+    }
   }]
 }
 ```
+- `resource` is an object (`ResourceInfo`) at the top level, not a string inside `accepts[]`. `description` lives there.
+- `amount` (not v1's `maxAmountRequired`) is in the asset's atomic unit. For `paypal-ledger` that is **micro-USD** (`asset` is the ISO 4217 code `USD`, and `extra.decimals: 6` says so explicitly), so `"2000"` is **$0.002**.
+  - **This deviates from the precedent.** The spec's `cloudflare:402` binding uses the same `asset: "USD"` with `amount` in cents, where `"2000"` would be $20.00. We use micro-USD because per-call prices are fractions of a cent. A client must read `extra.decimals` (or know `paypal-ledger`) before it shows or compares a price. See [decision 0011](decisions/0011-x402-v2-and-gemini-model.md).
+- `payTo` is the seller slug. `maxTimeoutSeconds` is required by the spec and equals `RECEIPT_TTL_SECONDS`.
+- Piko-specific fields go in `extra`, which the spec reserves for scheme-specific data: the challenge `nonce`, its `expiresAt`, the `facilitator` base URL and the `payUrl` that issues receipts. `extra.paymentFlow` is omitted, which means the default `authorization` flow (verify → resource → settle).
+
 The price shown is already the buyer org's **enterprise rate** if one exists. Free-allowance calls skip the 402 entirely.
 
-### Receipt
-A JWT (HS256, `RECEIPT_SIGNING_SECRET`) with claims `{ nonce, agentId, orgId, sellerId, endpointId, amount, exp }`. It lasts `RECEIPT_TTL_SECONDS` and is **single-use**: settling marks `challenges.consumed_at`, and a second use is rejected.
+### Receipt and payment payload
+The receipt is a JWT (HS256, `RECEIPT_SIGNING_SECRET`) with claims `{ nonce, agentId, orgId, sellerId, endpointId, amount, exp }`. It lasts `RECEIPT_TTL_SECONDS` and is **single-use**: settling marks `challenges.consumed_at`, and a second use is rejected.
 
-### Settlement
+The agent does not send the bare JWT. It sends an x402 `PaymentPayload` with the receipt as the scheme-specific `payload`, base64-encoded in `PAYMENT-SIGNATURE`. `POST /api/pay` returns this ready-made as `paymentSignature`, so a client can copy it into the header.
+```json
+{
+  "x402Version": 2,
+  "resource": { "url": "https://<app>/g/priya/history" },
+  "accepted": { "scheme": "paypal-ledger", "network": "paypal:sandbox", "amount": "2000", "asset": "USD", "payTo": "priya", "maxTimeoutSeconds": 60, "extra": { "decimals": 6, "nonce": "c_01J…", "expiresAt": "2026-11-10T12:00:30Z", "facilitator": "https://<app>/api/facilitator", "payUrl": "https://<app>/api/pay" } },
+  "payload": { "receipt": "eyJhbGciOiJIUzI1NiJ9…" }
+}
+```
+`accepted` must equal one of the offered `accepts[]` entries, and the receipt's `nonce` and `amount` must match it.
+
+### Settlement (`SettlementResponse`, the `PAYMENT-RESPONSE` header)
 After the upstream response:
-- **2xx–4xx:** the Call is **paid**, and the three ledger entries are written in one transaction.
-- **5xx or timeout (`UPSTREAM_TIMEOUT_MS`):** the Call is **refunded**. The reservation is released (or reversing entries are written), and the agent gets `502 { "error": { "code": "upstream_failed", "refunded": true } }`.
+- **2xx–4xx:** the Call is **paid**, and the three ledger entries are written in one transaction. The header decodes to:
+  ```json
+  { "success": true, "transaction": "call_01J…", "network": "paypal:sandbox", "payer": "agent_01J…", "amount": "2000" }
+  ```
+  `transaction` is the Piko Call id (there is no blockchain hash) and `payer` is the agent id.
+- **5xx or timeout (`UPSTREAM_TIMEOUT_MS`):** the Call is marked **refunded**. In the `authorization` flow nothing is posted before the upstream answers, so no ledger entries are written: the reservation is released. The agent gets `502 { "error": { "code": "upstream_failed", "refunded": true } }` with a `PAYMENT-RESPONSE` of `{ "success": false, "errorReason": "upstream_failed", "transaction": "", "network": "paypal:sandbox" }`.
 
 ## 3. Public API (in openapi.yaml)
 
@@ -71,8 +106,15 @@ After the upstream response:
 | 4 | `GET /api/directory/search` | Agent | Semantic search over listings, with prices for the caller's org |
 | 5 | `GET /api/wallet` | Agent | Balance, budgets left, frozen state for this key |
 | 6 | `GET /api/facilitator/supported` | Anyone | Schemes and networks Piko settles |
-| 7 | `POST /api/facilitator/verify` | Seller | Check a receipt without consuming it |
-| 8 | `POST /api/facilitator/settle` | Seller | Consume a receipt and settle (for sellers not behind the hosted gateway) |
+| 7 | `POST /api/facilitator/verify` | Anyone holding the `PaymentPayload` | Check a receipt without consuming it |
+| 8 | `POST /api/facilitator/settle` | Anyone holding the `PaymentPayload` | Consume a receipt and settle (used by sellers not behind the hosted gateway) |
+
+### Facilitator endpoints (x402 v2 shapes)
+These follow the spec's facilitator interface (§7 of the core spec), so any x402 v2 resource server can use Piko as its facilitator for `paypal-ledger`.
+- `GET /api/facilitator/supported` → `{ "kinds": [{ "x402Version": 2, "scheme": "paypal-ledger", "network": "paypal:sandbox" }], "extensions": [], "signers": {} }`. `signers` is empty because no on-chain key signs anything.
+- `POST /api/facilitator/verify` and `POST /api/facilitator/settle` both take `{ "x402Version": 2, "paymentPayload": <PaymentPayload>, "paymentRequirements": <PaymentRequirements> }`.
+- `verify` is **read-only** and returns `{ "isValid": true, "payer": "agent_01J…" }` or `{ "isValid": false, "invalidReason": "challenge_expired", "invalidMessage": "…" }`.
+- `settle` consumes the receipt, writes the ledger entries and returns a `SettlementResponse` (as in §2). A seller calls it only after its handler succeeds (the `authorization` flow). If it never calls it, the reservation is released when the receipt expires, so nothing is charged.
 
 ## 4. Errors
 
@@ -96,6 +138,7 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 - **Tools:** one per seller endpoint. The name and description come from the listing, and the input schema comes from the endpoint's parameters. **Each tool's description includes its price**, so the model sees the cost before calling it.
 - **A tool call** runs the autopay path (§2) and returns the upstream result. A short line ("Charged $0.002 via Piko") is added to the content.
 - **Errors** from §4 come back as MCP tool errors with the same `code`. `approval_pending` includes the approval URL so a human can act on it.
+- **x402 over MCP (optional, not in the build order):** to serve x402-native MCP clients, follow the x402 v2 MCP transport ([spec](https://github.com/x402-foundation/x402/blob/main/specs/transports-v2/mcp.md)). An unpaid call returns a tool result with `isError: true` and the `PaymentRequired` object in `structuredContent` (and as JSON text in `content[0].text`). The client retries with the `PaymentPayload` in `params._meta["x402/payment"]`, and the result carries the `SettlementResponse` in `_meta["x402/payment-response"]`. MCP uses plain JSON objects there, not base64.
 
 ## 6. Internal dashboard routes (not in openapi.yaml)
 

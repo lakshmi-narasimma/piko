@@ -50,13 +50,13 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** The repo exists, `main` holds every doc, and the labels and milestones exist. *(It goes public with an MIT licence in P9-11.)*
   - **Depends on:** nothing
 
-- [ ] **P0-02 Set up the PayPal sandbox** · `human` `paypal` · M
-  - **Goal:** Complete steps 1–6 of [PAYPAL_SETUP.md](PAYPAL_SETUP.md): the six sandbox accounts and the `piko` REST app with Payouts and Invoicing turned on.
-  - **Done when:** The client id and secret are in `.env.local`, and the checklist items for steps 1–6 are ticked.
+- [x] **P0-02 Set up the PayPal sandbox** · `human` `paypal` · M
+  - **Goal:** Complete steps 1–3 of [PAYPAL_SETUP.md](PAYPAL_SETUP.md): the six sandbox accounts and the `piko` REST app with Payouts and Invoicing turned on. The tunnel and webhook (steps 4–5) moved to P2-05, because they need the running app.
+  - **Done when:** The client id and secret are in `.env.local`, and the checklist items for the accounts and the REST app are ticked.
   - **Depends on:** nothing
 
 - [x] **P0-03 Get the other keys and the database** · `human` `infra` · S
-  - **Goal:** Get the Gemini key, the Channel3 key, a Neon database with `CREATE EXTENSION vector`, and the generated secrets (PAYPAL_SETUP.md steps 7–9).
+  - **Goal:** Get the Gemini key, the Channel3 key, a Neon database with `CREATE EXTENSION vector`, and the generated secrets (PAYPAL_SETUP.md steps 6–9).
   - **Done when:** `.env.local` has every value from `.env.example` except the webhook id and the Render URL.
   - **Depends on:** nothing
 
@@ -65,7 +65,7 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** The answer is recorded in [DESIGN.md §19](DESIGN.md#19-open-items).
   - **Depends on:** nothing
 
-- [ ] **P0-05 Confirm the x402 v2 details and the Gemini limits** · `research` `docs` · S
+- [x] **P0-05 Confirm the x402 v2 details and the Gemini limits** · `research` `docs` · S
   - **Goal:** Read the x402-foundation `specs/` for v2 header names, payload shapes and the rules for a custom scheme. Confirm the current Gemini Flash model name, its free-tier limits, and the embedding model.
   - **Done when:** Any differences are fixed in API.md and openapi.yaml, and a decision record `0011` captures the findings.
   - **Depends on:** nothing
@@ -187,7 +187,7 @@ Covers TEST_PLAN **F4**.
 - [ ] **P2-05 Webhook endpoint** · `paypal` `core` · M
   - **Goal:** `/api/paypal/webhook` verifies the signature with `PAYPAL_WEBHOOK_ID`, stores each event once in `webhook_events`, and sends it to a handler by type. This task covers `PAYMENT.CAPTURE.COMPLETED`; later phases register more handlers.
   - **Done when:** A replayed webhook credits nothing, and a bad signature gets a 400.
-  - **Depends on:** P2-04, and the webhook from PAYPAL_SETUP.md step 6 (`human`)
+  - **Depends on:** P2-04, and the tunnel and webhook from [PAYPAL_SETUP.md](PAYPAL_SETUP.md) steps 4–5 (`human`, moved here from P0-02). Once the app runs locally, ask the human to do them and put the Webhook ID in `PAYPAL_WEBHOOK_ID`.
 
 - [ ] **P2-06 Wallet screen** · `ui` `paypal` · L
   - **Goal:** The balance, a PayPal JS SDK v6 top-up button that explains a cancelled popup, the budget per task or day, the "notify above" setting, and keys (create, show once, revoke).
@@ -370,7 +370,7 @@ Covers TEST_PLAN **F8**.
 Covers TEST_PLAN **F3**, **F11**, and the rest of **F2** and **F10**.
 
 - [ ] **P8-01 Automatic refunds** · `core` · M
-  - **Goal:** An upstream 5xx or timeout writes three reversing entries, marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
+  - **Goal:** An upstream 5xx or timeout releases the Call's reservation without posting any ledger entries (in the `authorization` flow nothing is posted before the upstream answers), marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
   - **Done when:** Every F3 item passes.
   - **Depends on:** P1-10
 

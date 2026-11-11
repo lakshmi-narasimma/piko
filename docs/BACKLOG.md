@@ -80,7 +80,7 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** A decision record explains the choice, `db:migrate` runs on an empty database, and one test can write and read a row.
   - **Depends on:** P0-06, P0-03
 
-- [ ] **P0-08 Add CI** · `infra` · S
+- [x] **P0-08 Add CI** · `infra` · S
   - **Goal:** A GitHub Action that runs lint, typecheck and tests (with a Postgres service) on every PR.
   - **Done when:** A PR shows a green check, and a failing test turns it red.
   - **Depends on:** P0-07

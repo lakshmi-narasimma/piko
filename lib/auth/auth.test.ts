@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type Db } from "../db/client";
 import { accounts, memberships, orgs } from "../db/schema";
-import { areaFor, findByPassword, findPersona, loadPrincipal } from "./accounts";
+import { areaFor, findByPassword, findPersona, isPersona, loadPrincipal } from "./accounts";
 import { hashPassword, verifyPassword } from "./password";
 import { readSession, SESSION_TTL_SECONDS, signSession } from "./session";
 
@@ -58,6 +58,15 @@ describe("areaFor", () => {
 
 const url = inject("testDatabaseUrl");
 
+describe("isPersona", () => {
+  it("accepts only the seeded personas, without case", () => {
+    expect(isPersona("sam@demo.piko")).toBe(true);
+    expect(isPersona(" Dana@Acme.demo ")).toBe(true);
+    expect(isPersona("someone@acme.demo")).toBe(false);
+    expect(isPersona("")).toBe(false);
+  });
+});
+
 describe.skipIf(!url)("account lookups", () => {
   let db: Db;
   const tag = randomUUID().slice(0, 8);
@@ -84,15 +93,29 @@ describe.skipIf(!url)("account lookups", () => {
     await db.$client.end();
   });
 
-  it("finds a persona by email and puts it in the Wallet", async () => {
-    expect(await findPersona(db, email)).toMatchObject({ area: "wallet", role: "admin" });
+  it("refuses a passwordless login for any account that isn't a persona", async () => {
+    // This account exists and has an org, but it isn't in PERSONAS.
+    expect(await findPersona(db, email)).toBeNull();
     expect(await findPersona(db, "nobody@auth.test")).toBeNull();
+  });
+
+  it("puts a solo dev's account in the Wallet", async () => {
+    expect(await loadPrincipal(db, accountId, orgId)).toMatchObject({
+      area: "wallet",
+      role: "admin",
+    });
   });
 
   it("logs in by password only with the right one", async () => {
     expect(await findByPassword(db, email, "correct horse")).toMatchObject({ area: "wallet" });
     expect(await findByPassword(db, email, "wrong")).toBeNull();
     expect(await findByPassword(db, "nobody@auth.test", "correct horse")).toBeNull();
+  });
+
+  it("matches the email without case or surrounding spaces", async () => {
+    expect(await findByPassword(db, ` ${email.toUpperCase()} `, "correct horse")).toMatchObject({
+      area: "wallet",
+    });
   });
 
   it("reloads a principal only for the org it was issued for", async () => {

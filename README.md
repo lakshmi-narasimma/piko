@@ -68,7 +68,7 @@ More detail: [docs/DESIGN.md](docs/DESIGN.md) · API: [docs/API.md](docs/API.md)
 1. Requirements: Node 24 LTS or newer (see `.node-version`), npm, a free Neon Postgres database, a PayPal developer account.
 2. Follow [docs/PAYPAL_SETUP.md](docs/PAYPAL_SETUP.md) to create the sandbox accounts and keys.
 3. `cp .env.example .env.local` and fill it in. The app refuses to start if a required value is missing, and names it.
-   - `TEST_DATABASE_URL` must be a separate Postgres with pgvector (for example `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=piko_test pgvector/pgvector:pg17`). `npm test` wipes and re-migrates it on every run. If it isn't set, the database tests are skipped.
+   - `TEST_DATABASE_URL` must be a separate Postgres with pgvector (for example `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=piko_test pgvector/pgvector:pg18`). `npm test` wipes and re-migrates it on every run. If it isn't set, the database tests are skipped.
 4. Install, set up the database and start the app:
    ```sh
    npm install
@@ -77,6 +77,12 @@ More detail: [docs/DESIGN.md](docs/DESIGN.md) · API: [docs/API.md](docs/API.md)
    npm run dev          # http://localhost:3000
    ```
 5. Open http://localhost:3000.
+6. Make a paid Call through the x402 loop. PayPal top-ups aren't built yet, so seed Sam's wallet first, and put the Key the seed prints in `PIKO_AGENT_KEY`:
+   ```sh
+   npm run seed -- --sam-wallet-micro=5000000   # $5.00, for local runs only
+   PIKO_AGENT_KEY=pk_agent_... npm run agent    # 402, then pay, then the paid retry
+   ```
+   `npm run agent` calls Price History (`/g/priya/history`), which needs the sample seller APIs (P1-06) running behind the gateway.
 
 Checks (the same ones CI runs):
 ```sh
@@ -85,6 +91,10 @@ npm run typecheck   # TypeScript, strict
 npm test            # Vitest
 npm run build       # production build
 ```
+
+## Deploy (Render)
+- Set every variable from `.env.example` in Render's environment settings. The server checks them at boot and exits non-zero if one is missing or invalid, so a bad deploy fails instead of going live.
+- `NEXT_PUBLIC_PAYPAL_CLIENT_ID` is inlined into the browser bundle by `next build`, so it must be set before the build runs, not only at runtime. Changing it needs a rebuild.
 
 ## Honesty notes
 - All payments use the **PayPal sandbox**: no real money.

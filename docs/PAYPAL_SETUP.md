@@ -68,7 +68,9 @@ Done when: the dashboard's webhook simulator can send a `PAYMENT.CAPTURE.COMPLET
 
 ## 8. Database (Neon, free)
 1. Sign up at **neon.tech** and create a project called `piko`.
-2. Copy the **pooled connection string** → `DATABASE_URL`.
+2. In **Connect**, copy both connection strings, each wrapped in double quotes (they contain `&`):
+   - pooling **off** → `DATABASE_URL` (migrations)
+   - pooling **on** (host ends in `-pooler`) → `DATABASE_URL_POOLED` (the app)
 3. In the SQL editor, run `CREATE EXTENSION IF NOT EXISTS vector;`. If it fails, tell Claude, and directory search will fall back to in-app similarity.
 
 ## 9. Secrets you generate
@@ -90,11 +92,11 @@ Done once the app runs locally.
 ---
 
 ## Checklist
-- [ ] 6 sandbox accounts created; logins saved privately
-- [ ] REST app created; Payouts and Invoicing enabled
-- [ ] Webhook registered; `PAYPAL_WEBHOOK_ID` saved
-- [ ] Gemini key and model name saved
-- [ ] Channel3 key saved
-- [ ] Neon database created; `vector` extension enabled (or noted as failed)
-- [ ] Two secrets generated
+- [x] 6 sandbox accounts created; logins saved privately
+- [x] REST app created; Payouts and Invoicing enabled
+- [ ] Webhook registered; `PAYPAL_WEBHOOK_ID` saved *(later: backlog task P2-05, once the app runs)*
+- [x] Gemini key and model name saved
+- [x] Channel3 key saved
+- [x] Neon database created; `vector` extension enabled (or noted as failed)
+- [x] Two secrets generated
 - [ ] Discord question asked

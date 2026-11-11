@@ -88,7 +88,12 @@ describe.skipIf(!url)("ledger", () => {
       .returning({ id: listings.id });
     const [endpoint] = await db
       .insert(endpoints)
-      .values({ listingId: listing!.id, method: "GET", pathOrTool: "/x", priceMicro: 2000n })
+      .values({
+        listingId: listing!.id,
+        method: "GET",
+        pathOrTool: `/x-${randomUUID()}`,
+        priceMicro: 2000n,
+      })
       .returning({ id: endpoints.id });
     const [agent] = await db
       .insert(agents)
@@ -519,10 +524,88 @@ describe.skipIf(!url)("ledger", () => {
 
       const reserved = await createChallenge(s.endpointId, 2000n);
       await reserve(reserved);
-      expect(await codeOf(reserve(reserved))).toBe("challenge_already_reserved");
+      const [otherAgent] = await db
+        .insert(agents)
+        .values({ orgId: s.buyerOrgId, name: `agent-${randomUUID()}` })
+        .returning({ id: agents.id });
+      expect(
+        await codeOf(
+          reserveFunds(db, {
+            nonce: reserved,
+            agentId: otherAgent!.id,
+            buyerOrgId: s.buyerOrgId,
+            ttlSeconds: 60,
+          }),
+        ),
+      ).toBe("challenge_already_reserved");
 
       await settleCall(db, { nonce: reserved, callId: randomUUID() });
       expect(await codeOf(reserve(reserved))).toBe("challenge_consumed");
+    });
+
+    it("returns the same hold when the same agent reserves again before it is used", async () => {
+      const s = await createScenario(10_000n);
+      const nonce = await createChallenge(s.endpointId, 2000n);
+      const reserve = () =>
+        reserveFunds(db, { nonce, agentId: s.agentId, buyerOrgId: s.buyerOrgId, ttlSeconds: 60 });
+
+      const first = await reserve();
+      // The hold outlives the Challenge's own expiry, and a retry must still work.
+      await db
+        .update(challenges)
+        .set({ expiresAt: new Date(Date.now() - 1000) })
+        .where(eq(challenges.nonce, nonce));
+      const again = await reserve();
+
+      expect(first.reissued).toBe(false);
+      expect(again).toEqual({ ...first, reissued: true });
+      expect(await availableFunds(db, s.buyerOrgId)).toBe(8000n);
+    });
+
+    it("does not hand back a hold whose expiry has moved, or one that ended", async () => {
+      const s = await createScenario(10_000n);
+      const reserve = (nonce: string) =>
+        reserveFunds(db, { nonce, agentId: s.agentId, buyerOrgId: s.buyerOrgId, ttlSeconds: 60 });
+
+      const claimed = await createChallenge(s.endpointId, 2000n);
+      await reserve(claimed);
+      // What claiming the hold for a Call does: its expiry moves past the Receipt's.
+      await db
+        .update(challenges)
+        .set({ reservationExpiresAt: sql`reservation_expires_at + interval '2 seconds'` })
+        .where(eq(challenges.nonce, claimed));
+      expect(await codeOf(reserve(claimed))).toBe("challenge_already_reserved");
+
+      const ended = await createChallenge(s.endpointId, 2000n);
+      const first = await reserve(ended);
+      await expireReservation(ended);
+      const fresh = await reserve(ended);
+      expect(fresh.reissued).toBe(false);
+      expect(fresh.reservationExpiresAt.getTime()).toBeGreaterThan(
+        first.reservationExpiresAt.getTime(),
+      );
+    });
+
+    it("only lets the buyer org a Challenge is bound to reserve it", async () => {
+      const s = await createScenario(10_000n);
+      const other = await createScenario(10_000n);
+      const reserve = (buyer: { agentId: string; buyerOrgId: string }, nonce: string) =>
+        reserveFunds(db, { nonce, ...buyer, ttlSeconds: 60 });
+
+      const keyed = await createChallenge(s.endpointId, 2000n);
+      await db
+        .update(challenges)
+        .set({ buyerOrgId: s.buyerOrgId, agentId: s.agentId })
+        .where(eq(challenges.nonce, keyed));
+      expect(await codeOf(reserve(other, keyed))).toBe("challenge_buyer_mismatch");
+      await expect(reserve(s, keyed)).resolves.toMatchObject({ reissued: false });
+
+      // A hold binds an anonymous Challenge to its payer, even after the hold ends.
+      const anonymous = await createChallenge(s.endpointId, 2000n);
+      await reserve(s, anonymous);
+      await expireReservation(anonymous);
+      expect(await codeOf(reserve(other, anonymous))).toBe("challenge_buyer_mismatch");
+      expect(await availableFunds(db, other.buyerOrgId)).toBe(10_000n);
     });
 
     it("rejects an unknown org", async () => {
@@ -693,6 +776,94 @@ describe.skipIf(!url)("ledger", () => {
 
       expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(5);
       expect(await availableFunds(db, s.buyerOrgId)).toBe(0n);
+    });
+
+    /**
+     * Two payments, each in the caller's own transaction at `isolationLevel`. Both take
+     * their snapshot before either reserves, which is how a stale snapshot overdraws.
+     */
+    async function payInCallerTransactions(
+      isolationLevel: "read committed" | "repeatable read" | "serializable",
+    ) {
+      const s = await createScenario(3000n);
+      const nonces = await Promise.all([
+        createChallenge(s.endpointId, 2000n),
+        createChallenge(s.endpointId, 2000n),
+      ]);
+
+      let arrived = 0;
+      let release!: () => void;
+      const bothHaveSnapshots = new Promise<void>((resolve) => (release = resolve));
+
+      const results = await Promise.allSettled(
+        nonces.map((nonce) =>
+          db.transaction(
+            async (tx) => {
+              await tx.execute(sql`select count(*) from ${ledgerEntries}`);
+              if (++arrived === 2) release();
+              await bothHaveSnapshots;
+              await reserveFunds(tx, {
+                nonce,
+                agentId: s.agentId,
+                buyerOrgId: s.buyerOrgId,
+                ttlSeconds: 60,
+              });
+              return settleCall(tx, { nonce, callId: randomUUID() });
+            },
+            { isolationLevel },
+          ),
+        ),
+      );
+      return { s, results };
+    }
+
+    it("never overdraws when callers pay inside REPEATABLE READ transactions", async () => {
+      const { s, results } = await payInCallerTransactions("repeatable read");
+
+      expect(results.filter((r) => r.status === "fulfilled").length).toBeLessThanOrEqual(1);
+      for (const r of results) {
+        if (r.status === "rejected") {
+          expect(r.reason).toBeInstanceOf(LedgerError);
+          expect((r.reason as LedgerError).code).toBe("unsupported_isolation");
+        }
+      }
+      expect(await wallet(s.buyerOrgId)).toBeGreaterThanOrEqual(0n);
+      expect(await availableFunds(db, s.buyerOrgId)).toBeGreaterThanOrEqual(0n);
+    });
+
+    it("rejects paying inside SERIALIZABLE and settling inside REPEATABLE READ", async () => {
+      const { s, results } = await payInCallerTransactions("serializable");
+
+      expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
+      for (const r of results) {
+        expect((r as PromiseRejectedResult).reason.code).toBe("unsupported_isolation");
+      }
+      expect(await wallet(s.buyerOrgId)).toBe(3000n);
+
+      const nonce = await createChallenge(s.endpointId, 2000n);
+      await reserveFunds(db, {
+        nonce,
+        agentId: s.agentId,
+        buyerOrgId: s.buyerOrgId,
+        ttlSeconds: 60,
+      });
+      expect(
+        await codeOf(
+          db.transaction((tx) => settleCall(tx, { nonce, callId: randomUUID() }), {
+            isolationLevel: "repeatable read",
+          }),
+        ),
+      ).toBe("unsupported_isolation");
+    });
+
+    it("lets exactly one through when callers pay inside READ COMMITTED transactions", async () => {
+      const { s, results } = await payInCallerTransactions("read committed");
+
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      const rejected = results.find((r) => r.status === "rejected");
+      expect(rejected?.reason).toBeInstanceOf(InsufficientFundsError);
+      expect(await wallet(s.buyerOrgId)).toBe(1000n);
+      expect(await seller(s.sellerOrgId)).toBe(1900n);
     });
 
     it("does not deadlock when two orgs buy from each other", { timeout: 30_000 }, async () => {

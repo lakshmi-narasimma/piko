@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { AREA_PATH, endSession, startSession } from "@/lib/auth";
-import { findByPassword, findPersona } from "@/lib/auth/accounts";
+import { findByPassword, findPersona, isPersona } from "@/lib/auth/accounts";
 import { getDb } from "@/lib/db/client";
 import { getEnv } from "@/lib/env";
 
@@ -14,6 +14,7 @@ export interface LoginState {
 /** One-click persona login. Only exists while DEMO_MODE=true. */
 export async function loginAsPersona(email: string): Promise<LoginState> {
   if (!getEnv().DEMO_MODE) return { error: "The persona switcher is turned off." };
+  if (!isPersona(email)) return { error: "Unknown persona." };
   const principal = await findPersona(getDb(), email);
   if (!principal) {
     return { error: "That persona isn't in the database yet. Run `npm run seed`." };

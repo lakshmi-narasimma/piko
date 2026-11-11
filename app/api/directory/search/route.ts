@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import { getDb } from "@/lib/db";
 import { DEFAULT_SEARCH_LIMIT, searchDirectory } from "@/lib/directory";
 import { jsonError } from "@/lib/http";
@@ -10,6 +11,8 @@ import { AI_BUSY_MESSAGE, getLlm, isAiBusy } from "@/lib/llm";
  * route of its own). Prices are the caller's own (its enterprise rate where it has one).
  */
 export async function GET(request: Request) {
+  // Reads the environment, so it must not be prerendered at build time.
+  await connection();
   const db = getDb();
   const auth = await authenticateRequest(db, request.headers);
   if (!auth.ok) return jsonError(401, "invalid_key", "Send a valid Key as a Bearer token.");

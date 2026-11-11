@@ -76,7 +76,7 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "423": { $ref: "#/components/responses/Error" }
         "502":
-          description: Upstream failed; the call was refunded
+          description: Upstream failed; the reservation was released and nothing was charged (Call marked refunded)
           headers:
             PAYMENT-RESPONSE:
               schema: { type: string }
@@ -291,7 +291,7 @@ components:
         scheme: { type: string, example: paypal-ledger }
         network: { type: string, example: "paypal:sandbox", description: "CAIP-2 style namespace:reference" }
         amount: { $ref: "#/components/schemas/MicroUsd" }
-        asset: { type: string, example: USD, description: "ISO 4217 code; amount is in micro-units (extra.decimals)" }
+        asset: { type: string, example: USD, description: "ISO 4217 code; amount is in micro-units (extra.decimals: 6), not cents as in the cloudflare:402 precedent" }
         payTo: { type: string, description: Seller slug }
         maxTimeoutSeconds: { type: integer, example: 60 }
         extra:

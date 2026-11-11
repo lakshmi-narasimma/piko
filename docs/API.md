@@ -66,7 +66,8 @@ All three headers carry **base64-encoded JSON** (standard base64 of the UTF-8 JS
 }
 ```
 - `resource` is an object (`ResourceInfo`) at the top level, not a string inside `accepts[]`. `description` lives there.
-- `amount` (not v1's `maxAmountRequired`) is in the asset's atomic unit. For `paypal-ledger` that is **micro-USD** (`asset` is the ISO 4217 code `USD`, and `extra.decimals: 6` says so explicitly).
+- `amount` (not v1's `maxAmountRequired`) is in the asset's atomic unit. For `paypal-ledger` that is **micro-USD** (`asset` is the ISO 4217 code `USD`, and `extra.decimals: 6` says so explicitly), so `"2000"` is **$0.002**.
+  - **This deviates from the precedent.** The spec's `cloudflare:402` binding uses the same `asset: "USD"` with `amount` in cents, where `"2000"` would be $20.00. We use micro-USD because per-call prices are fractions of a cent. A client must read `extra.decimals` (or know `paypal-ledger`) before it shows or compares a price. See [decision 0011](decisions/0011-x402-v2-and-gemini-model.md).
 - `payTo` is the seller slug. `maxTimeoutSeconds` is required by the spec and equals `RECEIPT_TTL_SECONDS`.
 - Piko-specific fields go in `extra`, which the spec reserves for scheme-specific data: the challenge `nonce`, its `expiresAt`, the `facilitator` base URL and the `payUrl` that issues receipts. `extra.paymentFlow` is omitted, which means the default `authorization` flow (verify → resource → settle).
 
@@ -103,7 +104,7 @@ After the upstream response:
   { "success": true, "transaction": "call_01J…", "network": "paypal:sandbox", "payer": "agent_01J…", "amount": "2000" }
   ```
   `transaction` is the Piko Call id (there is no blockchain hash) and `payer` is the agent id.
-- **5xx or timeout (`UPSTREAM_TIMEOUT_MS`):** the Call is **refunded**. The reservation is released (or reversing entries are written), and the agent gets `502 { "error": { "code": "upstream_failed", "refunded": true } }` with a `PAYMENT-RESPONSE` of `{ "success": false, "errorReason": "upstream_failed", "transaction": "", "network": "paypal:sandbox" }`.
+- **5xx or timeout (`UPSTREAM_TIMEOUT_MS`):** the Call is marked **refunded**. In the `authorization` flow nothing is posted before the upstream answers, so no ledger entries are written: the reservation is released. The agent gets `502 { "error": { "code": "upstream_failed", "refunded": true } }` with a `PAYMENT-RESPONSE` of `{ "success": false, "errorReason": "upstream_failed", "transaction": "", "network": "paypal:sandbox" }`.
 
 ## 3. Public API (in openapi.yaml)
 
@@ -115,8 +116,8 @@ After the upstream response:
 | 4 | `GET /api/directory/search` | Agent | Semantic search over listings, with prices for the caller's org |
 | 5 | `GET /api/wallet` | Agent | Balance, budgets left, frozen state for this key |
 | 6 | `GET /api/facilitator/supported` | Anyone | Schemes and networks Piko settles |
-| 7 | `POST /api/facilitator/verify` | Seller | Check a receipt without consuming it |
-| 8 | `POST /api/facilitator/settle` | Seller | Consume a receipt and settle (for sellers not behind the hosted gateway) |
+| 7 | `POST /api/facilitator/verify` | Anyone holding the `PaymentPayload` | Check a receipt without consuming it |
+| 8 | `POST /api/facilitator/settle` | Anyone holding the `PaymentPayload` | Consume a receipt and settle (used by sellers not behind the hosted gateway) |
 
 ### Facilitator endpoints (x402 v2 shapes)
 These follow the spec's facilitator interface (§7 of the core spec), so any x402 v2 resource server can use Piko as its facilitator for `paypal-ledger`.

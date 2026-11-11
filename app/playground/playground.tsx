@@ -38,6 +38,7 @@ type ServerEvent =
   | { type: "answer"; text: string }
   | { type: "tool-call"; id: string; name: string; input: Record<string, unknown> }
   | { type: "tool-result"; id: string; ok: boolean; costMicro: string; output: unknown }
+  | { type: "notice"; text: string }
   | { type: "busy"; message: string }
   | { type: "error"; message: string }
   | { type: "done"; spentMicro: string; recommendation: Recommendation };
@@ -90,6 +91,11 @@ function apply(state: RunState, event: ServerEvent): RunState {
         ),
       };
     }
+    case "notice":
+      return {
+        ...state,
+        steps: [...state.steps, { kind: "note", tone: "busy", text: event.text }],
+      };
     case "busy":
       return {
         ...state,

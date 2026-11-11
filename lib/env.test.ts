@@ -100,7 +100,7 @@ describe("parseEnv", () => {
 
   it("rejects a bad Gemini fallback list or embedding dimension count", () => {
     expect(() => parseEnv({ ...valid, GEMINI_FALLBACK_MODELS: "ok,not ok" })).toThrow(
-      /GEMINI_FALLBACK_MODELS: must be a comma-separated list of model ids/,
+      /GEMINI_FALLBACK_MODELS: must be a model id/,
     );
     expect(() => parseEnv({ ...valid, GEMINI_EMBEDDING_DIMENSIONS: "0" })).toThrow(
       /GEMINI_EMBEDDING_DIMENSIONS:/,

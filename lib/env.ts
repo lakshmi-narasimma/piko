@@ -16,6 +16,7 @@ const positiveInt = z.coerce.number().int().positive();
 // pinned ids are accepted.
 const pinnedModelId = z
   .string()
+  .regex(/^[a-z0-9][a-z0-9.-]*$/i, "must be a model id")
   .refine((id) => !id.endsWith("-latest"), "must be a pinned model id, not a -latest alias");
 
 function commaList(value: string): string[] {

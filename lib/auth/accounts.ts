@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { accounts, memberships, orgs } from "../db/schema";
 import { verifyPassword } from "./password";
@@ -33,6 +33,21 @@ export const PERSONAS = [
   { email: "omar@datacorp.demo", name: "Omar", blurb: "Sells APIs through DataCorp" },
 ] as const;
 
+/** Emails are compared without case, so `Sam@demo.piko` is the same account as `sam@demo.piko`. */
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function emailIs(email: string) {
+  return eq(sql`lower(${accounts.email})`, normalizeEmail(email));
+}
+
+/** True only for the seeded demo personas, the one set of accounts that may log in without a password. */
+export function isPersona(email: string): boolean {
+  const wanted = normalizeEmail(email);
+  return PERSONAS.some((persona) => persona.email === wanted);
+}
+
 /** An account's first org, or null if it has none. */
 async function principalFor(db: Db, where: ReturnType<typeof eq>): Promise<Principal | null> {
   const [row] = await db
@@ -59,9 +74,14 @@ function toPrincipal(row: {
   };
 }
 
-/** Passwordless lookup for the persona switcher. The caller must have checked DEMO_MODE. */
-export function findPersona(db: Db, email: string): Promise<Principal | null> {
-  return principalFor(db, eq(accounts.email, email));
+/**
+ * Passwordless lookup for the persona switcher. The caller must have checked DEMO_MODE.
+ * A server action's arguments come from the client, so this refuses any email that isn't
+ * one of the PERSONAS: otherwise demo mode would be a passwordless login for every account.
+ */
+export async function findPersona(db: Db, email: string): Promise<Principal | null> {
+  if (!isPersona(email)) return null;
+  return principalFor(db, emailIs(email));
 }
 
 /** Email and password login. Null for an unknown email, a wrong password or no password set. */
@@ -73,11 +93,11 @@ export async function findByPassword(
   const [row] = await db
     .select({ hash: accounts.passwordHash })
     .from(accounts)
-    .where(eq(accounts.email, email))
+    .where(emailIs(email))
     .limit(1);
   // Verify even when no hash exists so the response time doesn't reveal which emails exist.
   const ok = await verifyPassword(password, row?.hash ?? "scrypt:AA:AA");
-  return ok ? principalFor(db, eq(accounts.email, email)) : null;
+  return ok ? principalFor(db, emailIs(email)) : null;
 }
 
 /** Reloads a session's principal. Null if the account left the org or no longer exists. */

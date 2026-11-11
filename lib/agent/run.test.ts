@@ -63,7 +63,7 @@ function context(): AgentToolContext {
     key: "pk_agent_secret",
     baseUrl: "http://localhost:3000",
     taskBudgetMicro: 100_000n,
-    state: { spentMicro: 0n },
+    state: { spentMicro: 0n, reservedMicro: 0n },
     search: vi.fn(async () => []),
     lookupPrice: vi.fn(async () => 2_000n),
     walletBalance: vi.fn(async () => 5_000_000n),

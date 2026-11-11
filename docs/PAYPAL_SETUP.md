@@ -68,7 +68,9 @@ Done when: the dashboard's webhook simulator can send a `PAYMENT.CAPTURE.COMPLET
 
 ## 8. Database (Neon, free)
 1. Sign up at **neon.tech** and create a project called `piko`.
-2. Copy the **pooled connection string** → `DATABASE_URL`.
+2. In **Connect**, copy both connection strings, each wrapped in double quotes (they contain `&`):
+   - pooling **off** → `DATABASE_URL` (migrations)
+   - pooling **on** (host ends in `-pooler`) → `DATABASE_URL_POOLED` (the app)
 3. In the SQL editor, run `CREATE EXTENSION IF NOT EXISTS vector;`. If it fails, tell Claude, and directory search will fall back to in-app similarity.
 
 ## 9. Secrets you generate

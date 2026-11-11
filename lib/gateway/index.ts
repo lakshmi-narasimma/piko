@@ -158,12 +158,16 @@ function withPaymentResponse(response: Response, settlement: SettlementResponse)
  * Claiming the hold is what admits the request: only one request per Receipt gets past it,
  * in any process. It also extends the hold to cover reading the body, the upstream call and
  * settling, so the seller never runs on a hold that has run out.
+ *
+ * `onClaimLost` lets a caller answer a lost claim its own way. Autopay with an
+ * Idempotency-Key uses it to send the same 409 a concurrent request gets at any other step.
  */
 async function servePaidCall(
   { db, config }: GatewayDeps,
   route: GatewayRoute,
   request: Request,
   claims: ReceiptClaims,
+  onClaimLost?: () => Promise<Response | null>,
 ): Promise<Response> {
   const claimed = await claimReservation(db, {
     nonce: claims.nonce,
@@ -174,6 +178,8 @@ async function servePaidCall(
       Math.ceil((bodyTimeoutMs(config) + config.upstreamTimeoutMs) / 1000) + SETTLE_MARGIN_SECONDS,
   });
   if (!claimed) {
+    const answer = await onClaimLost?.();
+    if (answer) return answer;
     return paymentRejected({
       code: "challenge_expired",
       message: "This Receipt is in use, already used, or its reservation has ended.",
@@ -245,11 +251,17 @@ async function serveAutopay(
     return payErrorResponse(error);
   }
 
+  // With a key, a concurrent request can get this same Receipt back from the pay step (a
+  // retry during an unclaimed hold) and then use it first. Losing to it, at verify or at the
+  // claim, gets the same 409 as losing at the pay step.
+  const replayIfKeyed = () =>
+    key === null ? Promise.resolve(null) : idempotentReplay(deps.db, nonce);
+
   const verified = await verifyPayment(deps, decodeHeaderValue(issued.paymentSignature), {
     endpointId: route.endpointId,
   });
-  if (!verified.ok) return paymentRejected(verified);
-  return servePaidCall(deps, route, request, verified.claims);
+  if (!verified.ok) return (await replayIfKeyed()) ?? paymentRejected(verified);
+  return servePaidCall(deps, route, request, verified.claims, replayIfKeyed);
 }
 
 async function handle(

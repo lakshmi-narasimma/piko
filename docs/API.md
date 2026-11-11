@@ -154,7 +154,7 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 | 429 | `breaker_tripped` | Circuit breaker froze the agent just now | `calls`, `windowSeconds` |
 | 403 | `policy_denied` | A policy blocks this vendor or price | `policyId`, `rule` |
 | 202 | `approval_pending` | Needs a human; poll the approval | `approvalId`, `approvalUrl` |
-| 402 | `budget_exceeded` | Agent, team or org budget is used up | `scope`, `remaining` |
+| 402 | `budget_exceeded` | This payment would take an agent, team or org budget over its cap | `scope`, `remaining`, `budgetId`, `period`, `category`, `max` |
 | 410 | `challenge_expired` | Nonce expired or already used | — |
 | 402 | `insufficient_funds` | Prepaid balance or org credit limit is too low | `balance`: micro-USD available |
 
@@ -170,6 +170,8 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 The gateway never issues a $0 Challenge (a $0 endpoint is forwarded free, see §2), so `invalid_amount` from `/api/pay` only means bad data.
 
 `POST /api/pay` must see the challenge before the funds check, so a stale nonce gets 410 even with an empty wallet.
+
+**Budgets.** Every budget covering the paying agent is checked, the agent's first, then its team's, then its org's, and the first one the Challenge's amount doesn't fit in is reported. `scope` is `agent`, `team` or `org`; `period` is `day`, `month` or `task`; `category` is the listing category the budget is limited to, or `null` for all; `max` and `remaining` are micro-USD strings. `remaining` is what is left before this payment: `max` minus settled spend in the current period (net of refunds) minus every unsettled hold, never below `"0"`. A payment that exactly uses up `remaining` passes. Periods are UTC days and months. A `task` budget counts from when the budget was last saved. Holds count so that concurrent payments can't both fit under one cap; a retry of a payment that already holds its amount isn't counted twice.
 
 An autopay gateway request (§2) returns the `/api/pay` errors above, plus these for `Idempotency-Key`:
 

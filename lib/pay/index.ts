@@ -2,8 +2,11 @@
  * The `POST /api/pay` pipeline (docs/DESIGN.md section 9): an ordered list of steps, each of
  * which can stop the payment by throwing a PayError. Phase 5 inserts the breaker, policy
  * and budget steps into PAY_STEPS, between the Challenge lookup and the funds check.
+ * A step whose check must hold under concurrency also pushes it onto `holdChecks`, which
+ * reserveFunds runs under the buyer org's lock.
  */
 import { eq, sql } from "drizzle-orm";
+import { BudgetExceededError, enforceBudgets } from "../budgets";
 import type { Db } from "../db/client";
 import { challenges, endpoints, listings, orgs } from "../db/schema";
 import { jsonError } from "../http";
@@ -11,6 +14,7 @@ import { authenticateRequest, type AuthenticatedAgent } from "../keys";
 import {
   InsufficientFundsError,
   LedgerError,
+  type DbOrTx,
   reserveFunds,
   type LedgerErrorCode,
   type Reservation,
@@ -68,6 +72,8 @@ interface PayContext extends PayDeps {
   challenge?: PayableChallenge;
   reservation?: Reservation;
   issued?: IssuedReceipt;
+  /** Checks to repeat under the buyer org's lock, just before the hold is taken. */
+  holdChecks: ((tx: DbOrTx) => Promise<void>)[];
 }
 
 export interface PayStep {
@@ -177,6 +183,40 @@ const loadPayableChallenge: PayStep = {
   },
 };
 
+const checkBudgets: PayStep = {
+  name: "budget",
+  async run(context) {
+    const { agent, challenge, nonce } = context;
+    const enforce = async (db: DbOrTx) => {
+      try {
+        await enforceBudgets(db, {
+          orgId: agent!.orgId,
+          teamId: agent!.teamId,
+          agentId: agent!.agentId,
+          endpointId: challenge!.endpointId,
+          amountMicro: challenge!.amountMicro,
+          nonce,
+        });
+      } catch (error) {
+        if (!(error instanceof BudgetExceededError)) throw error;
+        const { budget } = error;
+        throw new PayError(402, "budget_exceeded", error.message, {
+          scope: budget.scope,
+          remaining: budget.remainingMicro.toString(),
+          budgetId: budget.budgetId,
+          period: budget.period,
+          category: budget.category,
+          max: budget.maxMicro.toString(),
+        });
+      }
+    };
+    // An early answer. The same check runs again under the org lock, so concurrent
+    // payments can't both fit under one Budget.
+    await enforce(context.db);
+    context.holdChecks.push(enforce);
+  },
+};
+
 const reserve: PayStep = {
   name: "funds",
   async run(context) {
@@ -187,6 +227,9 @@ const reserve: PayStep = {
         agentId: agent!.agentId,
         buyerOrgId: agent!.orgId,
         ttlSeconds: config.receiptTtlSeconds,
+        beforeHold: async (tx) => {
+          for (const check of context.holdChecks) await check(tx);
+        },
       });
     } catch (error) {
       throw asPayError(error);
@@ -231,12 +274,13 @@ const issueReceipt: PayStep = {
 
 /**
  * Phase 5 adds its steps between `challenge` and `funds`, in the order DESIGN.md section 9
- * gives: breaker, then policies, then budgets.
+ * gives: breaker, then policies, then budgets (`budget`, the last before `funds`).
  */
 export const PAY_STEPS: readonly PayStep[] = [
   authenticateAgent,
   rejectFrozen,
   loadPayableChallenge,
+  checkBudgets,
   reserve,
   issueReceipt,
 ];
@@ -251,7 +295,7 @@ export async function runPayPipeline(
   body: unknown,
   agent?: AuthenticatedAgent,
 ): Promise<IssuedReceipt> {
-  const context: PayContext = { ...deps, headers, body, agent };
+  const context: PayContext = { ...deps, headers, body, agent, holdChecks: [] };
   for (const step of PAY_STEPS) await step.run(context);
   return context.issued!;
 }

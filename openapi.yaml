@@ -157,7 +157,13 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
-        "402": { $ref: "#/components/responses/Error" }
+        "402":
+          description: |
+            budget_exceeded (details scope, remaining, budgetId, period, category, max; see
+            docs/API.md section 4) or insufficient_funds (details balance). Nothing is held.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }

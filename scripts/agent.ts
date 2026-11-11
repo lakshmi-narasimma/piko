@@ -9,6 +9,7 @@
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { loadEnvConfig } from "@next/env";
+import { formatUsd } from "../lib/money";
 
 export interface AgentOptions {
   baseUrl: string;
@@ -25,13 +26,6 @@ export interface AgentResult {
   nonce: string;
   amountMicro: string;
   callId: string;
-}
-
-/** Integer micro-USD to dollars, for display only. */
-function formatDollars(micro: string): string {
-  const value = BigInt(micro);
-  const fraction = (value % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
-  return `$${value / 1_000_000n}.${fraction.padEnd(2, "0")}`;
 }
 
 function decodeHeader(value: string): unknown {
@@ -63,7 +57,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     accepts: Array<{ amount: string; payTo: string; extra: { nonce: string; payUrl: string } }>;
   };
   const offer = challenge.accepts[0]!;
-  log(`   402 Challenge: ${formatDollars(offer.amount)} to ${offer.payTo}`);
+  log(`   402 Challenge: ${formatUsd(BigInt(offer.amount))} to ${offer.payTo}`);
 
   log(`2. POST ${offer.extra.payUrl} with the agent's Key`);
   const payResponse = await fetch(offer.extra.payUrl, {
@@ -91,7 +85,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   };
   const body = await paidResponse.text();
   log(`   ${paidResponse.status} Upstream response: ${body}`);
-  log(`   Paid ${formatDollars(settlement.amount)}, Call ${settlement.transaction}`);
+  log(`   Paid ${formatUsd(BigInt(settlement.amount))}, Call ${settlement.transaction}`);
 
   return {
     status: paidResponse.status,

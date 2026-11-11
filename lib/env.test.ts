@@ -18,7 +18,10 @@ describe("parseEnv", () => {
   it("accepts the required variables and applies defaults", () => {
     const env = parseEnv(valid);
     expect(env.PAYPAL_ENV).toBe("sandbox");
-    expect(env.GEMINI_MODEL).toBe("gemini-flash-latest");
+    expect(env.GEMINI_MODEL).toBe("gemini-3.6-flash");
+    expect(env.GEMINI_FALLBACK_MODELS).toEqual(["gemini-3-flash-preview", "gemini-3.5-flash-lite"]);
+    expect(env.GEMINI_EMBEDDING_MODEL).toBe("gemini-embedding-2");
+    expect(env.GEMINI_EMBEDDING_DIMENSIONS).toBe(768);
     expect(env.PLATFORM_FEE_BPS).toBe(500);
     expect(env.PAYOUT_THRESHOLD_MICRO).toBe(1_000_000n);
     expect(env.DEMO_MODE).toBe(false);
@@ -28,7 +31,7 @@ describe("parseEnv", () => {
     const env = parseEnv({ ...valid, PAYPAL_WEBHOOK_ID: "", GROQ_API_KEY: "", GEMINI_MODEL: "" });
     expect(env.PAYPAL_WEBHOOK_ID).toBe("");
     expect(env.GROQ_API_KEY).toBe("");
-    expect(env.GEMINI_MODEL).toBe("gemini-flash-latest");
+    expect(env.GEMINI_MODEL).toBe("gemini-3.6-flash");
   });
 
   it("fails fast on a missing or blank required variable, naming it without its value", () => {
@@ -42,6 +45,28 @@ describe("parseEnv", () => {
     expect(error).toBeInstanceOf(EnvError);
     expect((error as EnvError).issues).toEqual(
       expect.arrayContaining(["SESSION_SECRET: missing", "DATABASE_URL_POOLED: missing"]),
+    );
+  });
+
+  it("parses the Gemini fallback list and embedding dimensions", () => {
+    const env = parseEnv({
+      ...valid,
+      GEMINI_FALLBACK_MODELS: " model-a , model-b.1 ,",
+      GEMINI_EMBEDDING_DIMENSIONS: "1536",
+    });
+    expect(env.GEMINI_FALLBACK_MODELS).toEqual(["model-a", "model-b.1"]);
+    expect(env.GEMINI_EMBEDDING_DIMENSIONS).toBe(1536);
+  });
+
+  it("rejects a bad Gemini fallback list or embedding dimension count", () => {
+    expect(() => parseEnv({ ...valid, GEMINI_FALLBACK_MODELS: "ok,not ok" })).toThrow(
+      /GEMINI_FALLBACK_MODELS: must be a comma-separated list of model ids/,
+    );
+    expect(() => parseEnv({ ...valid, GEMINI_EMBEDDING_DIMENSIONS: "0" })).toThrow(
+      /GEMINI_EMBEDDING_DIMENSIONS:/,
+    );
+    expect(() => parseEnv({ ...valid, GEMINI_EMBEDDING_DIMENSIONS: "7.5" })).toThrow(
+      /GEMINI_EMBEDDING_DIMENSIONS:/,
     );
   });
 

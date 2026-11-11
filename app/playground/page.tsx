@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { requirePrincipal } from "@/lib/auth";
+import { getEnv } from "@/lib/env";
 import { Playground } from "./playground";
 
 export const metadata = { title: "Playground · Piko" };
@@ -15,7 +16,7 @@ async function PlaygroundContent() {
           Watch an agent spend {org.name}&rsquo;s wallet, one paid API call at a time.
         </p>
       </header>
-      <Playground />
+      <Playground paypalClientId={getEnv().NEXT_PUBLIC_PAYPAL_CLIENT_ID} />
     </main>
   );
 }

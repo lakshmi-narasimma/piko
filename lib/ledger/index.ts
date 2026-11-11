@@ -3,6 +3,25 @@
  * one transaction, and a refund as three reversing entries. A balance is the sum of
  * its ledger_entries, in integer micro-USD.
  *
- * Placeholder: built in P1-03.
+ * Every function takes a Db or an open transaction, so the pay pipeline can compose
+ * them. Expected failures throw LedgerError; branch on its `code`.
  */
-export {};
+export {
+  balanceOf,
+  postCall,
+  refundCall,
+  type DbOrTx,
+  type LedgerAccount,
+  type PostCallInput,
+  type PostedCall,
+  type RefundedCall,
+} from "./entries";
+export { InsufficientFundsError, LedgerError, type LedgerErrorCode } from "./errors";
+export {
+  availableFunds,
+  reserveFunds,
+  settleCall,
+  type Reservation,
+  type ReserveFundsInput,
+  type SettledCall,
+} from "./reservations";

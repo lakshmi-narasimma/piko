@@ -300,7 +300,7 @@ Rules:
 - A unique index on `(reason, ref_id, account_type)` means the same event can't post twice to one account.
 - `ledger_entries.org_id` is null only for the platform account.
 - Every PayPal webhook handler is **idempotent**, keyed on the PayPal resource id. `webhook_events` is unique on the event id and on `(event_type, resource_id)`.
-- A **reservation** lives on the Challenge. It holds funds while `reserved_at` is set, `consumed_at` is null and `reservation_expires_at` is in the future. It needs no ledger entry, because entries are written on settle.
+- A **reservation** lives on the Challenge. It holds funds while `reserved_at` is set, `consumed_at` is null and `reservation_expires_at` is in the future. It needs no ledger entry, because entries are written on settle. Reserving and settling lock the buyer's org row and must run at READ COMMITTED (the Postgres default); inside a REPEATABLE READ or SERIALIZABLE transaction they throw `unsupported_isolation`, because an older snapshot could hide a concurrent reservation and overdraw the wallet.
 - A Challenge's `agent_id` and `buyer_org_id` are null when the 402 goes to a caller who sent no key. `POST /api/pay` fills them in.
 - `orgs.slug` is the `<seller>` in `/g/<seller>/…` and `/mcp/<seller>`.
 - `teams.frozen_at` and `orgs.frozen_at` back the kill switch at those levels.

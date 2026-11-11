@@ -100,7 +100,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** Unit tests cover even and uneven splits, such as 3 micro-USD, and no float ever touches an amount.
   - **Depends on:** P0-06
 
-- [ ] **P1-03 Ledger: post a Call and refund it** · `core` · M
+- [x] **P1-03 Ledger: post a Call and refund it** · `core` · M
   - **Goal:** In `lib/ledger`, write a Call's three entries in one transaction, write a refund as three reversing entries, add `balanceOf(account)`, and add a reserve-funds step that can't overdraw under concurrency (a row lock or serializable transaction).
   - **Done when:** Every F1 test passes, including the random run of 1,000 operations and the test of two concurrent Calls that would overdraw.
   - **Depends on:** P1-01, P1-02

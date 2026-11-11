@@ -1,20 +1,39 @@
 @import "tailwindcss";
 
+/* Design tokens. Components use these names (bg-surface, text-muted, border-line, bg-brand). */
 :root {
   --background: #ffffff;
   --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --surface: #f6f7f9;
+  --muted: #5b6270;
+  --line: #e3e5ea;
+  --brand: #003087;
+  --brand-foreground: #ffffff;
+  --accent: #0070e0;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+    --surface: #141518;
+    --muted: #a0a6b3;
+    --line: #2a2d34;
+    --brand: #5aa2ff;
+    --brand-foreground: #06101f;
+    --accent: #5aa2ff;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-accent: var(--accent);
 }
 
 body {

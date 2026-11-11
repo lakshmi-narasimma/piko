@@ -54,8 +54,19 @@ paths:
         - name: X-Piko-Autopay
           in: header
           required: false
-          schema: { type: boolean }
-          description: With an agent key, pay and call in one request
+          schema: { type: string, example: "true" }
+          description: |
+            Only the value true (any case) turns it on: with an agent key, pay and call in one
+            request. A key is required; without one, or with a wrong one, the answer is
+            401 invalid_key. Any other value is an ordinary request and gets the 402.
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 255 }
+          description: |
+            Only with X-Piko-Autopay. A retry with the same key (per agent and endpoint) never
+            pays twice: 409 idempotent_replay once paid, 409 idempotency_in_progress while the
+            first request runs. See docs/API.md section 2.
       responses:
         "200":
           description: Upstream response (any upstream 2xx–4xx is passed through)
@@ -68,6 +79,8 @@ paths:
             Payment required: the body is a Challenge and PAYMENT-REQUIRED is set.
             Or a PAYMENT-SIGNATURE that failed verification: the body is an Error with
             code invalid_receipt and there is no PAYMENT-REQUIRED header.
+            With X-Piko-Autopay, an Error with code insufficient_funds or budget_exceeded
+            (no PAYMENT-REQUIRED header); nothing was forwarded or charged.
           headers:
             PAYMENT-REQUIRED:
               schema: { type: string }
@@ -78,8 +91,25 @@ paths:
                 oneOf:
                   - { $ref: "#/components/schemas/Challenge" }
                   - { $ref: "#/components/schemas/Error" }
+        "400":
+          description: With X-Piko-Autopay, an Idempotency-Key that is empty or too long (code invalid_request)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Error" }
+        "403":
+          description: With X-Piko-Autopay, a policy blocked the payment (code policy_denied)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409":
+          description: |
+            With X-Piko-Autopay and an Idempotency-Key already used: idempotent_replay (already
+            paid; details callId and upstreamStatus) or idempotency_in_progress. Nothing was charged.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "408":
           description: The request body did not arrive in time (code request_timeout); nothing was forwarded or charged
           content:

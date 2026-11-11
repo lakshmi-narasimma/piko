@@ -149,7 +149,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** The facilitator routes in openapi.yaml match the responses, and a test settles a Call through them.
   - **Depends on:** P1-10
 
-- [ ] **P1-12 `X-Piko-Autopay` shortcut** · `core` · S
+- [x] **P1-12 `X-Piko-Autopay` shortcut** · `core` · S
   - **Goal:** With a key and `X-Piko-Autopay: true`, one request runs challenge → pay → forward on the server side.
   - **Done when:** The F2 autopay item passes, and the buyer is charged exactly once.
   - **Depends on:** P1-10
@@ -280,7 +280,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Depends on:** P5-02
 
 - [ ] **P5-04 Approvals** · `core` `ui` · M
-  - **Goal:** An "approval above" rule creates an Approval and returns 202 `approval_pending`. `GET /api/approvals/{id}` lets the agent poll. The Org console gets an approvals inbox to approve or deny.
+  - **Goal:** An "approval above" rule creates an Approval and returns 202 `approval_pending`. `GET /api/approvals/{id}` lets the agent poll. The Org console gets an approvals inbox to approve or deny. An autopay 202 must also carry the Challenge `nonce`, since the agent never saw the 402 ([API.md §2](API.md#2-the-paid-call-flow-x402-v2) "Approvals"); test that an approved autopay request can be completed.
   - **Done when:** The F5 approval item passes for both approve and deny.
   - **Depends on:** P5-03, P5-01
 

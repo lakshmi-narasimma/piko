@@ -132,6 +132,7 @@ export async function loadChallenge(db: Db, nonce: string): Promise<PayableChall
 const authenticateAgent: PayStep = {
   name: "key",
   async run(context) {
+    if (context.agent) return; // The caller authenticated it already (the gateway's autopay).
     const auth = await authenticateRequest(context.db, context.headers);
     if (!auth.ok) throw new PayError(401, "invalid_key", "Missing, wrong or revoked key.");
     context.agent = auth;
@@ -240,13 +241,17 @@ export const PAY_STEPS: readonly PayStep[] = [
   issueReceipt,
 ];
 
-/** Runs the pipeline. The first failing step stops it by throwing a PayError. */
+/**
+ * Runs the pipeline. The first failing step stops it by throwing a PayError. Pass `agent`
+ * when the caller has already authenticated the Key; the key step then trusts it.
+ */
 export async function runPayPipeline(
   deps: PayDeps,
   headers: Headers,
   body: unknown,
+  agent?: AuthenticatedAgent,
 ): Promise<IssuedReceipt> {
-  const context: PayContext = { ...deps, headers, body };
+  const context: PayContext = { ...deps, headers, body, agent };
   for (const step of PAY_STEPS) await step.run(context);
   return context.issued!;
 }

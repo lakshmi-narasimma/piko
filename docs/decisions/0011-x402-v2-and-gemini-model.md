@@ -2,6 +2,8 @@
 
 **Status:** Accepted · 2026-11-05
 
+**Refines:** [0002](0002-x402-style-protocol.md), [0003](0003-gemini-free-tier.md)
+
 ## Context
 [0002](0002-x402-style-protocol.md) chose x402's shape but left the exact v2 details and the custom-scheme rules open. [0003](0003-gemini-free-tier.md) chose the Gemini free tier but not a model. P0-05 checked both against primary sources. For x402 that was the x402-foundation `specs/` directory at commit `2884003` (2026-11-04). For Gemini it was Google's docs and live calls with the project's key on 2026-11-05.
 
@@ -23,8 +25,8 @@
 - **Payment flows:** `authorization` is the default (verify → resource → settle). `upfront` and `escrow` also exist. If `extra.paymentFlow` is omitted, the flow is `authorization`.
 - **Networks** use CAIP-2 `namespace:reference`, and "non-blockchain networks are encouraged to follow the CAIP-2 format (e.g. `ach:us`, `sepa:eu`)". The TypeScript SDK types a network as `` `${string}:${string}` ``.
 - **Custom schemes:**
-  - There is **no registry** and nothing to register. `scheme` and `network` are free strings, and clients skip `accepts[]` entries they don't recognise.
-  - The spec already contains a non-crypto, credit-backed binding: `batch-settlement` on `cloudflare:402`, with `asset: "USD"` and `payTo: "merchant"`, in which the network bills the payer off-chain.
+  - There is **no registry** and nothing to register. `scheme` and `network` are free strings. The core spec does not say what a client does with an `accepts[]` entry whose `scheme` or `network` it doesn't support; the only explicit skip rule is that a client SHOULD skip an entry with an unknown `extra.paymentFlow`. In practice a client can only pay with a scheme it implements, so it has to pick another entry or give up.
+  - The spec already contains a non-crypto, credit-backed binding: `batch-settlement` on `cloudflare:402`, with `asset: "USD"` and `payTo: "merchant"`, in which the network bills the payer off-chain. There `amount` is in the smallest unit of USD, which is **cents**.
   - Two open proposals, [#2126](https://github.com/x402-foundation/x402/issues/2126) (`credit-bundle`) and [#2134](https://github.com/x402-foundation/x402/issues/2134), propose further fiat schemes.
   - The process for an *official* scheme (specs/CONTRIBUTING.md) has three steps: open an issue or discussion, write `specs/schemes/<name>/scheme_<name>.md` from `scheme_template.md`, then open a PR.
 - **MCP transport:**
@@ -64,7 +66,7 @@
   - Gemini 3 thought signatures must be passed back unchanged across turns. The SDK does this when the full message history is reused.
 
 ## Decision
-**x402.** Piko speaks x402 v2 exactly, and adds only what the spec leaves to the scheme:
+**x402.** Piko uses the x402 v2 message shapes, headers and facilitator interface, and adds what the spec leaves to the scheme. The deliberate deviations are listed at the end of this section.
 - `PAYMENT-REQUIRED` carries a `PaymentRequired` with a `ResourceInfo` object. Each `accepts[]` entry is `scheme: "paypal-ledger"`, `network: "paypal:sandbox"`, `amount` in micro-USD, `asset: "USD"`, `payTo: <seller slug>` and `maxTimeoutSeconds: RECEIPT_TTL_SECONDS`.
 - Piko's own fields go in `extra: { decimals: 6, nonce, expiresAt, facilitator, payUrl }`.
 - `PAYMENT-SIGNATURE` is a base64 `PaymentPayload` with `payload: { receipt: <JWT> }`. `POST /api/pay` also returns this ready-made as `paymentSignature`.
@@ -72,6 +74,10 @@
 - The facilitator routes use the spec's request and response bodies.
 - The flow is the default `authorization` one. An external seller calls `/settle` only after its handler succeeds; an unsettled receipt simply expires and releases its reservation. The old `upstreamStatus` field on `/settle` is dropped.
 - We do not register anything. A `scheme_paypal_ledger.md` upstream PR is an optional stretch for after the build.
+- **Deliberate deviations** from a plain x402 v2 server:
+  - **`amount` is micro-USD, not cents.** The `cloudflare:402` precedent uses the same `asset: "USD"` with `amount` in cents. `paypal-ledger` uses micro-USD (`extra.decimals: 6`), because prices like $0.002 can't be expressed in cents. So `"amount": "2000"` means **$0.002** here; a client that assumed cents would read it as $20.00. Clients must read `extra.decimals` (or know the scheme) before showing a price.
+  - **Failure statuses.** The HTTP transport maps payment failures to 402 (plus `PAYMENT-RESPONSE` when settlement failed) and 400. Piko also documents two statuses the transport doesn't define: **410** `challenge_expired` (an expired or already-used nonce) and **502** `upstream_failed` (the upstream failed after verify, so nothing was settled), each with Piko's error body (API.md §4).
+  - **Receipt issuance.** Getting a receipt from `POST /api/pay` before sending `PAYMENT-SIGNATURE` is a Piko step with no x402 equivalent. A `paypal-ledger` client has to know about it (or use autopay).
 
 **Gemini.**
 - **Text, tools and structured output:** primary `GEMINI_MODEL=gemini-3.6-flash`.
@@ -80,7 +86,7 @@
 - **No aliases:** use pinned ids, never `-latest` aliases, because aliases hot-swap without notice and `gemini-flash-latest` was down today.
 
 ## Consequences
-- API.md §2–§3, openapi.yaml (`Challenge`, `PaymentRequirement`, new `ResourceInfo` and `PaymentPayload`, `FacilitatorRequest`, `Settlement`, `Receipt.paymentSignature`) and DESIGN.md §8 now use the v2 shapes. Code in `lib/x402` must build and parse these exact objects. An x402 v2 client that understands only `exact` will see our 402 and skip it, which is the expected behaviour.
+- API.md §2–§3, openapi.yaml (`Challenge`, `PaymentRequirement`, new `ResourceInfo` and `PaymentPayload`, `FacilitatorRequest`, `Settlement`, `Receipt.paymentSignature`) and DESIGN.md §8 now use the v2 shapes. Code in `lib/x402` must build and parse these exact objects. An x402 v2 client that understands only `exact` can't pay a `paypal-ledger` 402. The core spec doesn't define what it does next, so we don't rely on any particular fallback.
 - Agents need two steps to build `PAYMENT-SIGNATURE` (call `/api/pay`, then send `paymentSignature`). The autopay shortcut still hides this.
 - Gemini quotas are the main judging-day risk. If the ~20 RPD figure for Flash is right, a single playground run of 5–10 model calls uses half a day's quota. Mitigations:
   - Spread calls across the per-model fallback chain, since each model has its own quota.

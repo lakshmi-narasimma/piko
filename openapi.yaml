@@ -33,6 +33,10 @@ paths:
       description: |
         Without PAYMENT-SIGNATURE (and without X-Piko-Autopay) returns 402 with a challenge.
         With a valid receipt, proxies to the seller and returns the upstream response.
+        A free Call (agent key, within the endpoint's free quota) and any call to an
+        endpoint priced at 0 are proxied without a challenge. An upstream Location or
+        Content-Location under the seller's base URL is rewritten to /g/{seller}/...,
+        and one elsewhere on the upstream's origin is dropped.
         Other HTTP methods behave the same way.
       security:
         - {}
@@ -98,6 +102,9 @@ paths:
       tags: [Payments]
       operationId: pay
       summary: Authorise payment for a challenge and get a receipt
+      description: |
+        Safe to retry: the same agent paying the same nonce again, while its hold is
+        active and unused, gets the same receipt and the amount is held once.
       requestBody:
         required: true
         content:
@@ -126,6 +133,7 @@ paths:
         "410": { $ref: "#/components/responses/Error" }
         "423": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
 
   /api/approvals/{id}:
     get:
@@ -301,7 +309,7 @@ components:
         scheme: { type: string, example: paypal-ledger }
         network: { type: string, example: "paypal:sandbox", description: "CAIP-2 style namespace:reference" }
         amount: { $ref: "#/components/schemas/MicroUsd" }
-        asset: { type: string, example: USD, description: "ISO 4217 code; amount is in micro-units (extra.decimals)" }
+        asset: { type: string, example: USD, description: "ISO 4217 code; amount is in micro-units (extra.decimals: 6), not cents as in the cloudflare:402 precedent" }
         payTo: { type: string, description: Seller slug }
         maxTimeoutSeconds: { type: integer, example: 60 }
         extra:
@@ -433,6 +441,6 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, challenge_buyer_mismatch, upstream_failed, not_found, invalid_request, invalid_amount, invalid_receipt, request_timeout]
+              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, challenge_buyer_mismatch, upstream_failed, not_found, invalid_request, invalid_amount, invalid_receipt, request_timeout, internal_error]
             message: { type: string }
           additionalProperties: true

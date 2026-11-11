@@ -8,6 +8,27 @@
       "when": 1793819791727,
       "tag": "0000_enable_pgvector",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794250939638,
+      "tag": "0001_data_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794250940265,
+      "tag": "0002_ledger_append_only",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794419026870,
+      "tag": "0003_same_org_and_seller_routes",
+      "breakpoints": true
     }
   ]
 }

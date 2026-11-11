@@ -90,8 +90,8 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
 ## Phase 1: Payments core (ledger, x402 loop, sample APIs)
 Covers TEST_PLAN **F1** and **F2**.
 
-- [ ] **P1-01 Create the full data model** · `core` `infra` · M
-  - **Goal:** Write a migration for every table in [DESIGN.md §12](DESIGN.md#12-data-model-first-pass). Amounts are `bigint` micro-USD. Add `calls.simulated` and a `webhook_events` table for idempotency. Add the indexes that balances and calls need.
+- [x] **P1-01 Create the full data model** · `core` `infra` · M
+  - **Goal:** Write a migration for every table in [DESIGN.md §12](DESIGN.md#12-data-model). Amounts are `bigint` micro-USD. Add `calls.simulated` and a `webhook_events` table for idempotency. Add the indexes that balances and calls need.
   - **Done when:** The migration applies cleanly, and the schema matches §12. Any differences are written back into §12.
   - **Depends on:** P0-07
 

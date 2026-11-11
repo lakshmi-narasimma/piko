@@ -269,32 +269,45 @@ GitHub Action: ping every 10 min so the free instance stays awake during judging
 
 **Auth:** a persona switcher for judges ("Log in as Sam / Acme admin / Priya"), plus simple email+password for real accounts. Judges should never have to sign up.
 
-## 12. Data model (first pass)
+## 12. Data model
+
+Defined in `lib/db/schema.ts`. `id` columns are UUIDs, and every `*_micro` column is a `bigint`.
 
 ```
-accounts(id, email, name, password_hash)
-orgs(id, name, kind[personal|company], billing[prepaid|invoiced], credit_limit_micro, paypal_email)
+accounts(id, email, name, password_hash, created_at)
+orgs(id, name, slug, kind[personal|company], billing[prepaid|invoiced], credit_limit_micro, paypal_email, frozen_at, created_at)
 memberships(account_id, org_id, role[admin|member])
-teams(id, org_id, name)
-agents(id, org_id, team_id, name, frozen_at)
+teams(id, org_id, name, frozen_at, created_at)
+agents(id, org_id, team_id, name, notify_above_micro, frozen_at, created_at)
 api_keys(id, agent_id, hash, prefix, created_at, revoked_at)
-budgets(id, scope_type[org|team|agent], scope_id, period[day|month|task], max_micro, category?)
-policies(id, org_id, source_text, compiled_json, confirmed_at)
-approvals(id, agent_id, challenge_nonce, amount_micro, status[pending|approved|denied], decided_by)
-listings(id, seller_org_id, slug, name, description, base_url, kind[http|mcp], embedding)
-endpoints(id, listing_id, method, path_or_tool, price_micro, free_quota)
+budgets(id, org_id, scope_type[org|team|agent], scope_id, period[day|month|task], max_micro, category?, created_at)
+policies(id, org_id, source_text, compiled_json, confirmed_at, created_at)
+approvals(id, agent_id, org_id, policy_id?, challenge_nonce, amount_micro, status[pending|approved|denied], decided_by, decided_at, created_at)
+listings(id, seller_org_id, slug, name, description, base_url, kind[http|mcp|both], category?, rating?, embedding, created_at)
+endpoints(id, listing_id, seller_org_id, method, path_or_tool, price_micro, free_quota, created_at)
 rate_overrides(id, endpoint_id, buyer_org_id, price_micro)
-challenges(nonce, endpoint_id, agent_id, amount_micro, expires_at, consumed_at)
-calls(id, nonce, agent_id, endpoint_id, amount_micro, status[paid|refunded|blocked], upstream_status, latency_ms, simulated bool, created_at)
-ledger_entries(id, txn_id, account_type[wallet|seller|platform], org_id, amount_micro, reason, ref_id, created_at)
-topups(id, org_id, paypal_order_id, amount_micro, status)
-payouts(id, seller_org_id, paypal_batch_id, amount_micro, status)
-invoices(id, org_id, paypal_invoice_id, period, amount_micro, status)
-alerts(id, org_id, agent_id, type, message, created_at)
+challenges(nonce, endpoint_id, agent_id?, buyer_org_id?, amount_micro, expires_at, reserved_at, reservation_expires_at, consumed_at, created_at)
+calls(id, nonce?, agent_id, buyer_org_id, endpoint_id, amount_micro, status[paid|free|refunded|blocked], block_reason?, upstream_status, latency_ms, simulated bool, created_at)
+ledger_entries(id, txn_id, account_type[wallet|seller|platform], org_id?, amount_micro, reason[call|refund|topup|payout|payout_reversal|invoice_settlement|seed], ref_id, created_at)
+topups(id, org_id, paypal_order_id, paypal_capture_id, amount_micro, status[created|completed|failed], created_at)
+payouts(id, seller_org_id, paypal_batch_id, paypal_item_id, amount_micro, status[pending|settled|failed], created_at)
+invoices(id, org_id, paypal_invoice_id, period, amount_micro, status[draft|sent|paid|cancelled], created_at)
+alerts(id, org_id, agent_id?, type, message, created_at)
+webhook_events(id, paypal_event_id, event_type, resource_id, payload, received_at, processed_at)
 ```
 Rules:
-- The ledger is **append-only**. Balances come from summing `ledger_entries`, with a cached balance column if performance needs it.
-- Every PayPal webhook handler is **idempotent**, keyed on the PayPal resource id.
+- The ledger is **append-only**. Balances come from summing `ledger_entries`, with a cached balance column if performance needs it. A database trigger rejects `UPDATE` and `DELETE` on the table. `TRUNCATE` stays allowed so the demo seed can reset.
+- A unique index on `(reason, ref_id, account_type)` means the same event can't post twice to one account.
+- `ledger_entries.org_id` is null only for the platform account.
+- Every PayPal webhook handler is **idempotent**, keyed on the PayPal resource id. `webhook_events` is unique on the event id and on `(event_type, resource_id)`.
+- A **reservation** lives on the Challenge. It holds funds while `reserved_at` is set, `consumed_at` is null and `reservation_expires_at` is in the future. It needs no ledger entry, because entries are written on settle.
+- A Challenge's `agent_id` and `buyer_org_id` are null when the 402 goes to a caller who sent no key. `POST /api/pay` fills them in.
+- `orgs.slug` is the `<seller>` in `/g/<seller>/…` and `/mcp/<seller>`.
+- `teams.frozen_at` and `orgs.frozen_at` back the kill switch at those levels.
+- An Agent's team must be in the Agent's org: a composite foreign key `(team_id, org_id) → teams(id, org_id)` enforces it. An Agent with no team skips the check.
+- `budgets.scope_id` is an org, team or Agent id, according to `scope_type`, so it has no foreign key. Budget code must check that the scope belongs to the Budget's `org_id`.
+- A route is unique per seller, `(seller_org_id, method, path_or_tool)`, because the gateway URL `/g/<seller>/<path>` names no listing. `endpoints.seller_org_id` copies the listing's seller: a trigger fills it on insert, and a composite foreign key `(listing_id, seller_org_id) → listings(id, seller_org_id)` keeps the two equal.
+- `listings.rating` is between 0 and 5.
 
 ## 13. PayPal integration map
 

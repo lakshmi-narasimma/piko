@@ -9,7 +9,7 @@ import { getEnv } from "../env";
 import { jsonError } from "../http";
 import { authenticateRequest, type AuthenticatedAgent } from "../keys";
 import { claimReservation, releaseReservation } from "../ledger";
-import { payErrorResponse, runPayPipeline, type IssuedReceipt } from "../pay";
+import { payErrorResponse, PayError, runPayPipeline, type IssuedReceipt } from "../pay";
 import {
   decodeHeaderValue,
   encodeHeaderValue,
@@ -29,6 +29,7 @@ import {
   type UpstreamResult,
 } from "./forward";
 import { claimFreeCall, completeFreeCall, releaseFreeCall } from "./free";
+import { IDEMPOTENCY_KEY_HEADER, idempotentChallenge, idempotentReplay } from "./idempotency";
 import { findRoute, type GatewayRoute } from "./route";
 import {
   settlePayment,
@@ -68,6 +69,7 @@ const CORS_HEADERS: Record<string, string> = {
     "Content-Type",
     "Authorization",
     AUTOPAY_HEADER,
+    IDEMPOTENCY_KEY_HEADER,
   ].join(", "),
   "Access-Control-Expose-Headers": [PAYMENT_REQUIRED_HEADER, PAYMENT_RESPONSE_HEADER].join(", "),
 };
@@ -208,7 +210,8 @@ async function servePaidCall(
 
 /**
  * Runs the whole x402 loop inside one request: Challenge, then the pay pipeline, then the
- * same verify, forward and settle path a client's own retry takes. It charges once.
+ * same verify, forward and settle path a client's own retry takes. It charges once, and
+ * with an Idempotency-Key a retry of the same request charges nothing more.
  */
 async function serveAutopay(
   deps: GatewayDeps,
@@ -216,12 +219,26 @@ async function serveAutopay(
   request: Request,
   buyer: AuthenticatedAgent,
 ): Promise<Response> {
-  const { nonce } = await issueChallenge(deps.db, deps.config, route, buyer);
+  const key = request.headers.get(IDEMPOTENCY_KEY_HEADER);
+  let nonce: string;
+  if (key === null) {
+    ({ nonce } = await issueChallenge(deps.db, deps.config, route, buyer));
+  } else {
+    const challenge = await idempotentChallenge(deps, route, buyer, key);
+    if (!challenge.ok) return challenge.response;
+    nonce = challenge.nonce;
+  }
 
   let issued: IssuedReceipt;
   try {
-    issued = await runPayPipeline(deps, request.headers, { nonce });
+    // The buyer is already authenticated. No headers, so no pay step reads the gateway's.
+    issued = await runPayPipeline(deps, new Headers(), { nonce }, buyer);
   } catch (error) {
+    // A concurrent request with the same key reserved the Challenge first.
+    if (key !== null && error instanceof PayError && error.status === 410) {
+      const replay = await idempotentReplay(deps.db, nonce);
+      if (replay) return replay;
+    }
     return payErrorResponse(error);
   }
 

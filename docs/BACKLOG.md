@@ -280,7 +280,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Depends on:** P5-02
 
 - [ ] **P5-04 Approvals** · `core` `ui` · M
-  - **Goal:** An "approval above" rule creates an Approval and returns 202 `approval_pending`. `GET /api/approvals/{id}` lets the agent poll. The Org console gets an approvals inbox to approve or deny.
+  - **Goal:** An "approval above" rule creates an Approval and returns 202 `approval_pending`. `GET /api/approvals/{id}` lets the agent poll. The Org console gets an approvals inbox to approve or deny. An autopay 202 must also carry the Challenge `nonce`, since the agent never saw the 402 ([API.md §2](API.md#2-the-paid-call-flow-x402-v2) "Approvals"); test that an approved autopay request can be completed.
   - **Done when:** The F5 approval item passes for both approve and deny.
   - **Depends on:** P5-03, P5-01
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import {
@@ -11,7 +12,7 @@ import {
   type StubUpstream,
 } from "../../test/gateway-fixtures";
 import { createDb, type Db } from "../db/client";
-import { agents, calls, challenges } from "../db/schema";
+import { agents, calls, challenges, ledgerEntries } from "../db/schema";
 import { availableFunds, balanceOf } from "../ledger";
 import { decodeHeaderValue, type SettlementResponse } from "../x402";
 import { handleGatewayRequest } from "./index";
@@ -43,12 +44,17 @@ describe.skipIf(!url)("gateway: X-Piko-Autopay", () => {
 
   type Seller = Awaited<ReturnType<typeof createSeller>>;
 
-  function autopay(seller: Seller, key: string | undefined, value = "true") {
+  function autopay(
+    seller: Seller,
+    key: string | undefined,
+    value = "true",
+    extraHeaders: Record<string, string> = {},
+  ) {
     return handleGatewayRequest(
       { db, config },
       gatewayRequest("GET", `https://piko.test/g/${seller.slug}/history`, {
         key,
-        headers: { "X-Piko-Autopay": value },
+        headers: { "X-Piko-Autopay": value, ...extraHeaders },
       }),
       { seller: seller.slug, path: ["history"] },
     );
@@ -198,5 +204,116 @@ describe.skipIf(!url)("gateway: X-Piko-Autopay", () => {
     expect(res.status).toBe(402);
     expect(res.headers.has("PAYMENT-REQUIRED")).toBe(true);
     expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+  });
+
+  describe("Idempotency-Key", () => {
+    const withKey = (seller: Seller, rawKey: string, idempotencyKey: string) =>
+      autopay(seller, rawKey, "true", { "Idempotency-Key": idempotencyKey });
+
+    it("answers a retry of a paid request with 409 and charges once", async () => {
+      const seller = await createSeller(db, upstream.url);
+      const buyer = await createBuyer(db, 10_000n);
+      const before = upstream.requests.length;
+
+      const first = await withKey(seller, buyer.rawKey, "order-1");
+      expect(first.status).toBe(200);
+      const settlement = decodeHeaderValue(
+        first.headers.get("PAYMENT-RESPONSE")!,
+      ) as SettlementResponse;
+
+      const retry = await withKey(seller, buyer.rawKey, "order-1");
+      expect(retry.status).toBe(409);
+      expect(await errorOf(retry)).toMatchObject({
+        code: "idempotent_replay",
+        callId: settlement.transaction,
+        upstreamStatus: 200,
+      });
+      expect(upstream.requests.length - before).toBe(1);
+      expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(8_000n);
+    });
+
+    it("charges once for concurrent requests with the same key", async () => {
+      upstream.respond((_req, res) => {
+        setTimeout(() => {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        }, 200);
+      });
+      const seller = await createSeller(db, upstream.url);
+      const buyer = await createBuyer(db, 10_000n);
+      const before = upstream.requests.length;
+
+      const results = await Promise.all(
+        [1, 2, 3].map(() => withKey(seller, buyer.rawKey, "order-2")),
+      );
+
+      expect(results.map((res) => res.status).sort()).toEqual([200, 409, 409]);
+      for (const res of results.filter((r) => r.status === 409)) {
+        expect(["idempotency_in_progress", "idempotent_replay"]).toContain(
+          ((await errorOf(res)) as { code: string }).code,
+        );
+      }
+      expect(upstream.requests.length - before).toBe(1);
+      expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(8_000n);
+    });
+
+    it("charges again for a different key, and keys are per agent", async () => {
+      const seller = await createSeller(db, upstream.url);
+      const buyer = await createBuyer(db, 10_000n);
+      const other = await createBuyer(db, 10_000n);
+
+      expect((await withKey(seller, buyer.rawKey, "a")).status).toBe(200);
+      expect((await withKey(seller, buyer.rawKey, "b")).status).toBe(200);
+      expect((await withKey(seller, other.rawKey, "a")).status).toBe(200);
+
+      expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(6_000n);
+      expect(await balanceOf(db, { type: "wallet", orgId: other.orgId })).toBe(8_000n);
+    });
+
+    it("after an unpaid failure, the same key gets 410 and charges nothing", async () => {
+      upstream.respond((_req, res) => {
+        res.writeHead(503);
+        res.end();
+      });
+      const seller = await createSeller(db, upstream.url);
+      const buyer = await createBuyer(db, 10_000n);
+
+      expect((await withKey(seller, buyer.rawKey, "order-3")).status).toBe(502);
+      const retry = await withKey(seller, buyer.rawKey, "order-3");
+
+      expect(retry.status).toBe(410);
+      expect(await errorOf(retry)).toMatchObject({ code: "challenge_expired" });
+      expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+    });
+
+    it("after insufficient funds, the same key pays once the wallet can cover it", async () => {
+      const seller = await createSeller(db, upstream.url);
+      const buyer = await createBuyer(db, 1_000n);
+
+      expect((await withKey(seller, buyer.rawKey, "order-4")).status).toBe(402);
+      await db.insert(ledgerEntries).values({
+        txnId: randomUUID(),
+        accountType: "wallet",
+        orgId: buyer.orgId,
+        amountMicro: 9_000n,
+        reason: "seed",
+        refId: randomUUID(),
+      });
+
+      expect((await withKey(seller, buyer.rawKey, "order-4")).status).toBe(200);
+      expect((await withKey(seller, buyer.rawKey, "order-4")).status).toBe(409);
+      expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(8_000n);
+    });
+
+    it("rejects an over-long key with 400", async () => {
+      const seller = await createSeller(db, upstream.url);
+      const buyer = await createBuyer(db, 10_000n);
+
+      const res = await withKey(seller, buyer.rawKey, "k".repeat(256));
+
+      expect(res.status).toBe(400);
+      expect(await errorOf(res)).toMatchObject({ code: "invalid_request" });
+      expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+    });
   });
 });

@@ -22,8 +22,10 @@ export async function issueChallenge(
   config: X402Config,
   route: GatewayRoute,
   buyer: ChallengeBuyer | null,
+  /** A caller-chosen nonce, for an autopay Idempotency-Key. Random by default. */
+  options: { nonce?: string } = {},
 ): Promise<IssuedChallenge> {
-  const nonce = `c_${randomBytes(16).toString("base64url")}`;
+  const nonce = options.nonce ?? `c_${randomBytes(16).toString("base64url")}`;
   const [row] = await db
     .insert(challenges)
     .values({

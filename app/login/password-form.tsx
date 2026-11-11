@@ -3,8 +3,7 @@
 import { useActionState } from "react";
 import { loginWithPassword, type LoginState } from "./actions";
 
-const field =
-  "w-full rounded-md border border-zinc-300 bg-transparent px-3 py-2 dark:border-zinc-700";
+const field = "w-full rounded-md border border-line bg-transparent px-3 py-2 ";
 
 export function PasswordForm() {
   const [state, action, pending] = useActionState<LoginState, FormData>(loginWithPassword, {});
@@ -19,13 +18,13 @@ export function PasswordForm() {
         className={field}
       />
       {state.error && (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-red-700 dark:text-red-400">
           {state.error}
         </p>
       )}
       <button
         disabled={pending}
-        className="rounded-md bg-foreground px-3 py-2 text-background disabled:opacity-60"
+        className="rounded-md bg-brand px-3 py-2 text-brand-foreground disabled:opacity-60"
       >
         {pending ? "Signing in…" : "Sign in"}
       </button>

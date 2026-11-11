@@ -22,15 +22,15 @@ export function PersonaButtons({
                 setError((await loginAsPersona(persona.email))?.error);
               })
             }
-            className="rounded-lg border border-zinc-300 p-4 text-left hover:border-foreground disabled:opacity-60 dark:border-zinc-700"
+            className="rounded-lg border border-line p-4 text-left hover:border-brand disabled:opacity-60 "
           >
             <span className="block font-medium">{persona.name}</span>
-            <span className="block text-sm text-zinc-600 dark:text-zinc-400">{persona.blurb}</span>
+            <span className="block text-sm text-muted">{persona.blurb}</span>
           </button>
         ))}
       </div>
       {error && (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-red-700 dark:text-red-400">
           {error}
         </p>
       )}

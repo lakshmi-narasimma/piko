@@ -15,18 +15,25 @@ import { gatewayConfigFromEnv, handleGatewayRequest } from "../gateway";
 import { AUTOPAY_HEADER } from "../gateway/forward";
 import { findRoute } from "../gateway/route";
 import { balanceOf } from "../ledger";
-import { formatUsd } from "../money";
+import { formatUsd, parseUsd } from "../money";
 
 /** Where the agent's answers stop being useful: a model doesn't need a megabyte of JSON. */
 const MAX_BODY_CHARS = 4000;
+
+/** The product the agent settled on. The playground offers it as a PayPal checkout. */
+export interface Recommendation {
+  name: string;
+  priceMicro: bigint;
+  url?: string;
+}
 
 export interface AgentToolContext {
   /** The agent's own Key. It stays server-side and is never shown to the model. */
   key: string;
   baseUrl: string;
   taskBudgetMicro: bigint;
-  /** Running total of what this task has paid. The tools update it. */
-  state: { spentMicro: bigint };
+  /** What this task has paid and what the agent finally recommended. The tools update it. */
+  state: { spentMicro: bigint; recommendation?: Recommendation };
   search(query: string, limit: number): ReturnType<typeof searchDirectory>;
   /** The list price of an endpoint, or null if there is no such endpoint. */
   lookupPrice(seller: string, method: string, path: string): Promise<bigint | null>;
@@ -160,6 +167,31 @@ export function createAgentTools(ctx: AgentToolContext) {
           return { ...fail(code, errorMessage(text) ?? `HTTP ${response.status}`), ...cost(paid) };
         }
         return { ok: true as const, status: response.status, body: parseBody(text), ...cost(paid) };
+      },
+    }),
+
+    recommend_product: tool({
+      description:
+        "Call this once, at the end, with the single product you recommend buying. The buyer " +
+        "will be offered a checkout for it. Only recommend a product you saw in the results.",
+      inputSchema: z.object({
+        name: z.string().min(1).max(200),
+        priceUsd: z.string().describe("The price in dollars as a plain number, e.g. 249.99."),
+        url: z.string().optional().describe("The product link from the search results."),
+      }),
+      execute: async ({ name, priceUsd, url }) => {
+        let priceMicro: bigint;
+        try {
+          priceMicro = parseUsd(priceUsd);
+        } catch {
+          return fail("invalid_price", `"${priceUsd}" isn't a dollar amount like 249.99.`);
+        }
+        // A checkout is in whole cents, so a price PayPal couldn't charge isn't accepted.
+        if (priceMicro <= 0n || priceMicro % 10_000n !== 0n) {
+          return fail("invalid_price", "Give a price in dollars and cents, like 249.99.");
+        }
+        ctx.state.recommendation = { name, priceMicro, url };
+        return { ok: true as const, ...cost(0n) };
       },
     }),
 

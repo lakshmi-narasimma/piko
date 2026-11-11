@@ -93,7 +93,7 @@ Not claimed as unique: no-code paywalls for MCP tools, and refunds when a call f
 - **AI pricing help:** the seller pastes docs or an OpenAPI spec. Gemini suggests per-endpoint prices and writes the directory listing.
 - **Enterprise rates:** a per-buyer-org price override table ("Acme pays $0.003, everyone else $0.005").
 - **Analytics:** calls, revenue per endpoint, top calling agents and orgs, and how many 402 responses turn into paid calls.
-- **Automatic refunds:** if the seller's upstream returns 5xx or times out, the buyer's charge is reversed on the ledger.
+- **Automatic refunds:** if the seller's upstream returns 5xx or times out, the buyer isn't charged: the reservation is released and nothing is posted to the ledger.
 - **Payouts:** automatic once the balance reaches **$1.00**, plus a manual "Withdraw" button, through PayPal Payouts.
 
 ### 5.3 Directory
@@ -173,7 +173,7 @@ Sum of org's call debits for the period → Invoicing v2 create + send (line ite
 Orgs have a **credit limit**. If the invoice is unpaid past the limit, the org's keys are paused.
 
 ### 7.5 Refund on failure
-Upstream 5xx or timeout (default 10 s) → reverse that call's three ledger entries → the agent receives a 502 with `refunded: true`.
+Upstream 5xx or timeout (default 10 s) → release the reservation (in the `authorization` flow nothing is posted before the upstream answers, so there are no entries to reverse) → mark the Call refunded → the agent receives a 502 with `refunded: true`. Three reversing entries are only for refunding a Call that was already settled.
 
 ## 8. x402-style protocol
 
@@ -196,12 +196,12 @@ Piko follows x402's shape (HTTP 402 → pay → retry with proof) and acts as th
     }]
   }
   ```
-  `amount` is in micro-USD (`extra.decimals: 6`). Piko's own fields live in `extra`, which x402 reserves for scheme-specific data.
+  `amount` is in micro-USD (`extra.decimals: 6`), so `"2000"` is $0.002. This deviates from the spec's `cloudflare:402` precedent, which puts USD `amount` in cents. Piko's own fields live in `extra`, which x402 reserves for scheme-specific data.
 - **Facilitator endpoints:** `GET /api/facilitator/supported`, `POST /api/facilitator/verify`, `POST /api/facilitator/settle`, with the x402 v2 request and response shapes (API.md §3). The hosted gateway calls these internally, and an external seller could call them too.
-- **Receipt:** a JWT signed with a server key containing `{nonce, buyerAgent, seller, endpoint, amount, exp}`. It's **single-use** (the nonce is stored and consumed on settle) and expires in 60 s. The agent sends it wrapped in an x402 `PaymentPayload` (`payload: { receipt }`).
+- **Receipt:** a JWT signed with a server key containing `{nonce, agentId, orgId, sellerId, endpointId, amount, exp}` (the same claims as API.md §2). It's **single-use** (the nonce is stored and consumed on settle) and expires after `RECEIPT_TTL_SECONDS` (default 60 s). The agent sends it wrapped in an x402 `PaymentPayload` (`payload: { receipt }`).
 - **Headers:** confirmed against the x402 v2 HTTP transport spec: `PAYMENT-REQUIRED` (402 → agent), `PAYMENT-SIGNATURE` (agent → gateway), `PAYMENT-RESPONSE` (gateway → agent, a `SettlementResponse` whose `transaction` is the Call id). All three are base64-encoded JSON.
 - **Flow:** x402's default `authorization` flow (verify → call upstream → settle), which matches "refund on upstream failure".
-- **Registration:** none is needed. x402 has no scheme or network registry; any string works, and clients skip `accepts[]` entries they don't understand. Getting `paypal-ledger` into the official repo is optional: open an issue, then a PR with `specs/schemes/paypal-ledger/scheme_paypal_ledger.md` from the template. Details in [decision 0011](decisions/0011-x402-v2-and-gemini-model.md).
+- **Registration:** none is needed. x402 has no scheme or network registry; any string works. The core spec doesn't say what a client does with an `accepts[]` entry it can't pay (it only says a client SHOULD skip an unknown `extra.paymentFlow`), so a client without `paypal-ledger` support simply can't pay this one. Getting `paypal-ledger` into the official repo is optional: open an issue, then a PR with `specs/schemes/paypal-ledger/scheme_paypal_ledger.md` from the template. Details in [decision 0011](decisions/0011-x402-v2-and-gemini-model.md).
 
 ## 9. Policy engine, budgets and circuit breaker
 

@@ -370,7 +370,7 @@ Covers TEST_PLAN **F8**.
 Covers TEST_PLAN **F3**, **F11**, and the rest of **F2** and **F10**.
 
 - [ ] **P8-01 Automatic refunds** · `core` · M
-  - **Goal:** An upstream 5xx or timeout writes three reversing entries, marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
+  - **Goal:** An upstream 5xx or timeout releases the Call's reservation without posting any ledger entries (in the `authorization` flow nothing is posted before the upstream answers), marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
   - **Done when:** Every F3 item passes.
   - **Depends on:** P1-10
 

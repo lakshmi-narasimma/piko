@@ -192,6 +192,11 @@ The gateway never issues a $0 Challenge (a $0 endpoint is forwarded free, see §
 | `POST /api/demo/simulate` | Start or stop simulated traffic (demo mode only) |
 | `GET /api/demo/sellers/product-search/search?q=…` | Product Search sample API; queries Channel3 server-side and returns the fixed monitor fallback when unavailable or empty |
 | `GET /api/demo/sellers/price-history/history?product=…` | Price History sample API; returns 90 deterministic daily points for a product ID |
-| `/api/demo/sellers/*` | Other sample seller APIs (see SEED_DATA.md) |
+| `POST /api/demo/sellers/review-summariser/summarise` | Review Summariser sample API (Priya Labs); Gemini summarises the reviews via `lib/llm` |
+| `POST /api/demo/sellers/cheap-reviews/summarise` | Cheap Reviews sample API (DataCorp); same request and response as Review Summariser, but a terser prompt that reads only the first 5 reviews |
+
+These are the upstreams the seeded listings point at (SEED_DATA.md §3); buyers reach them through `/g/{seller}/…`.
 
 Product Search returns `{ "products": [...], "source": "channel3" | "fallback" }`. Its Channel3 API key stays server-side. Price History returns `{ "productId": "…", "currency": "USD", "history": [{ "date": "YYYY-MM-DD", "priceMicroUsd": "…" }] }`; the fixed window and integer micro-USD values are deterministic for each product ID.
+
+Both review APIs take `{ "reviews": string | string[], "product"?: string }` (a string of up to 20,000 characters, or 1–50 non-empty reviews of up to 2,000 characters each; `product` up to 200 characters) and return `{ "product": string | null, "reviewCount": n, "sentiment": "positive" | "mixed" | "negative", "pros": string[], "cons": string[], "verdict": "…" }` (at most 5 pros and 5 cons; `reviewCount` is the number of reviews actually read). A bad body is `400 invalid_request`, and when every model in the `lib/llm` chain is busy they return `503 ai_busy` with the safe "AI is busy" message (standard error body, §4).

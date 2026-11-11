@@ -115,7 +115,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** A smoke test calls Gemini, and a forced failure falls back to Groq or throws `AiBusy`.
   - **Depends on:** P0-06, P0-05
 
-- [ ] **P1-06 Sample seller APIs** · `core` `ai` · M
+- [x] **P1-06 Sample seller APIs** · `core` `ai` · M
   - **Goal:** Build the four APIs from [SEED_DATA.md §3](SEED_DATA.md#3-sellers-and-listings) under `/api/demo/sellers/*`:
     - Product Search: Channel3, falling back to a fixed product
     - Review Summariser: Gemini

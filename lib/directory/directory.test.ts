@@ -7,6 +7,14 @@ import { embedMissingListings, listingText, searchDirectory, type EmbeddingLlm }
 
 const DIMENSIONS = 768;
 
+/**
+ * Test files share one database, so there can be more unembedded Listings than one
+ * embedMissingListings batch covers. Embed until none are left (or a safety cap).
+ */
+async function embedAll(db: Db, llm: EmbeddingLlm) {
+  for (let i = 0; i < 100 && (await embedMissingListings(db, llm)) > 0; i++);
+}
+
 /** A bag-of-words embedding: texts that share words land close together. Offline and exact. */
 function embedText(text: string): number[] {
   const vector = new Array<number>(DIMENSIONS).fill(0);
@@ -87,10 +95,15 @@ describe.skipIf(!url)("directory search", () => {
   });
 
   it("ranks the closest Listing first", async () => {
-    const results = await searchDirectory(db, fakeLlm(), { query: `product prices zebra${tag}` });
+    const llm = fakeLlm();
+    await embedAll(db, llm);
+    const results = await searchDirectory(db, llm, {
+      query: `product prices zebra${tag}`,
+      limit: 20,
+    });
+    // The zebra word is unique to this Listing, so it is the closest of everything in the table.
     const mine = results.filter((r) => r.slug.endsWith(tag));
-    expect(mine[0]!.name).toBe(`Price Finder ${tag}`);
-    expect(mine[0]!.score).toBeGreaterThan(mine[1]!.score);
+    expect(results[0]!.name).toBe(`Price Finder ${tag}`);
     expect(mine[0]!.endpoints[0]).toMatchObject({
       method: "GET",
       priceMicro: 2_000n,
@@ -105,7 +118,7 @@ describe.skipIf(!url)("directory search", () => {
       .update(listings)
       .set({ embedding: null })
       .where(eq(listings.slug, `weather-${tag}`));
-    expect(await embedMissingListings(db, llm)).toBeGreaterThanOrEqual(1);
+    await embedAll(db, llm);
     const [row] = await db
       .select()
       .from(listings)
@@ -127,11 +140,11 @@ describe.skipIf(!url)("directory search", () => {
       .insert(rateOverrides)
       .values({ endpointId: endpoint!.id, buyerOrgId: buyer!.id, priceMicro: 700n });
 
-    const withRate = await searchDirectory(db, fakeLlm(), {
-      query: `product prices zebra${tag}`,
-      buyerOrgId: buyer!.id,
-    });
-    const plain = await searchDirectory(db, fakeLlm(), { query: `product prices zebra${tag}` });
+    const llm = fakeLlm();
+    await embedAll(db, llm);
+    const query = `product prices zebra${tag}`;
+    const withRate = await searchDirectory(db, llm, { query, buyerOrgId: buyer!.id, limit: 20 });
+    const plain = await searchDirectory(db, llm, { query, limit: 20 });
     const pick = (rs: typeof plain) => rs.find((r) => r.slug === `prices-${tag}`)!.endpoints[0]!;
     expect(pick(withRate).priceMicro).toBe(700n);
     expect(pick(plain).priceMicro).toBe(2_000n);

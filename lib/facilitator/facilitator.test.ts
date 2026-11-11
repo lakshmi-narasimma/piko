@@ -173,7 +173,10 @@ describe.skipIf(!url)("facilitator", () => {
 
     expect(second.status).toBe(410);
     await expect(second.json()).resolves.toMatchObject({
-      error: { code: "challenge_expired" },
+      success: false,
+      errorReason: "challenge_expired",
+      transaction: "",
+      network: "paypal:sandbox",
     });
     expect(await balanceOf(db, { type: "wallet", orgId: payment.buyer.orgId })).toBe(8_000n);
   });
@@ -199,10 +202,31 @@ describe.skipIf(!url)("facilitator", () => {
     expect(await balanceOf(db, { type: "wallet", orgId: payment.buyer.orgId })).toBe(10_000n);
   });
 
-  it("rejects malformed bodies with 400", async () => {
-    for (const body of ["not json", { x402Version: 1 }, { x402Version: 2, paymentPayload: {} }]) {
-      expect((await verify(body)).status).toBe(400);
-      expect((await settle(body)).status).toBe(400);
+  it("rejects malformed bodies with 400 and the x402 error codes", async () => {
+    const cases: [unknown, string][] = [
+      ["not json", "invalid_payload"],
+      [[], "invalid_payload"],
+      [{ x402Version: 1 }, "invalid_x402_version"],
+      [{ x402Version: 2, paymentRequirements: {} }, "invalid_payload"],
+      [{ x402Version: 2, paymentPayload: {} }, "invalid_payment_requirements"],
+    ];
+    for (const [body, code] of cases) {
+      const verified = await verify(body);
+      expect(verified.status).toBe(400);
+      await expect(verified.json()).resolves.toMatchObject({
+        isValid: false,
+        invalidReason: code,
+      });
+
+      const settled = await settle(body);
+      expect(settled.status).toBe(400);
+      await expect(settled.json()).resolves.toEqual({
+        success: false,
+        errorReason: code,
+        errorMessage: expect.any(String),
+        transaction: "",
+        network: "paypal:sandbox",
+      });
     }
   });
 

@@ -55,7 +55,7 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** The client id and secret are in `.env.local`, and the checklist items for steps 1–6 are ticked.
   - **Depends on:** nothing
 
-- [ ] **P0-03 Get the other keys and the database** · `human` `infra` · S
+- [x] **P0-03 Get the other keys and the database** · `human` `infra` · S
   - **Goal:** Get the Gemini key, the Channel3 key, a Neon database with `CREATE EXTENSION vector`, and the generated secrets (PAYPAL_SETUP.md steps 7–9).
   - **Done when:** `.env.local` has every value from `.env.example` except the webhook id and the Render URL.
   - **Depends on:** nothing

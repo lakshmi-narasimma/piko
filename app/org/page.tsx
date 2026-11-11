@@ -8,13 +8,13 @@ export const metadata = { title: "Org console · Piko" };
 async function OrgConsoleContent() {
   const { account, org } = await requirePrincipal("org");
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-start justify-center gap-4 px-4 py-12">
       <h1 className="text-3xl font-semibold tracking-tight">Org console</h1>
-      <p className="text-zinc-600 dark:text-zinc-400">
+      <p className="text-muted">
         Signed in as {account.name} ({org.name}). Teams, budgets and policies arrive in Phase 5.
       </p>
       <form action={logout}>
-        <button className="rounded-md border border-zinc-300 px-3 py-2 dark:border-zinc-700">
+        <button className="rounded-md border border-line px-3 py-2 hover:bg-surface">
           Sign out
         </button>
       </form>

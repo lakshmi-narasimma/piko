@@ -75,7 +75,7 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** `npm run dev` serves a placeholder page, every script runs, and the "Run it locally" section of README is filled in.
   - **Depends on:** P0-01
 
-- [ ] **P0-07 Choose the ORM and connect the database** · `infra` · S
+- [x] **P0-07 Choose the ORM and connect the database** · `infra` · S
   - **Goal:** Pick Drizzle or Prisma ([DESIGN.md §11](DESIGN.md#11-architecture) left it open). Wire up Neon, the migrations, and a separate test database (a Neon branch or local Postgres) that the tests reset.
   - **Done when:** A decision record explains the choice, `db:migrate` runs on an empty database, and one test can write and read a row.
   - **Depends on:** P0-06, P0-03

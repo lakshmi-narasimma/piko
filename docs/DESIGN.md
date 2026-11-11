@@ -260,7 +260,7 @@ GitHub Action: ping every 10 min so the free instance stays awake during judging
 
 **Stack:**
 - Next.js (App Router) and TypeScript
-- Postgres on Neon, using Drizzle or Prisma (pick one at scaffold time)
+- Postgres on Neon, using Drizzle ORM over node-postgres ([decision 0012](decisions/0012-drizzle.md))
 - Vercel AI SDK with the Gemini provider
 - PayPal Agent Toolkit plus direct REST calls
 - Official MCP TypeScript SDK

@@ -65,13 +65,29 @@ More detail: [docs/DESIGN.md](docs/DESIGN.md) · API: [docs/API.md](docs/API.md)
 | **Render** | Hosting |
 
 ## Run it locally
-*Fill in once the app is scaffolded.*
-
-1. Requirements: Node `<version>`, a free Neon Postgres database, a PayPal developer account.
+1. Requirements: Node 24 LTS or newer (see `.node-version`), npm, a free Neon Postgres database, a PayPal developer account.
 2. Follow [docs/PAYPAL_SETUP.md](docs/PAYPAL_SETUP.md) to create the sandbox accounts and keys.
-3. `cp .env.example .env.local` and fill it in.
-4. `<install command>` · `<migrate command>` · `<seed command>` · `<dev command>`
+3. `cp .env.example .env.local` and fill it in. The app refuses to start if a required value is missing, and names it.
+4. Install, set up the database and start the app:
+   ```sh
+   npm install
+   npm run db:migrate   # apply database migrations
+   npm run seed         # load the demo data
+   npm run dev          # http://localhost:3000
+   ```
 5. Open http://localhost:3000.
+
+Checks (the same ones CI runs):
+```sh
+npm run lint        # ESLint + Prettier
+npm run typecheck   # TypeScript, strict
+npm test            # Vitest
+npm run build       # production build
+```
+
+## Deploy (Render)
+- Set every variable from `.env.example` in Render's environment settings. The server checks them at boot and exits non-zero if one is missing or invalid, so a bad deploy fails instead of going live.
+- `NEXT_PUBLIC_PAYPAL_CLIENT_ID` is inlined into the browser bundle by `next build`, so it must be set before the build runs, not only at runtime. Changing it needs a rebuild.
 
 ## Honesty notes
 - All payments use the **PayPal sandbox**: no real money.

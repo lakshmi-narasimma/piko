@@ -13,3 +13,7 @@ coverage/
 # OS / editor
 .DS_Store
 *.log
+
+# Next.js / TypeScript
+*.tsbuildinfo
+next-env.d.ts

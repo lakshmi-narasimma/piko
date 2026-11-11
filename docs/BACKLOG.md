@@ -70,7 +70,7 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** Any differences are fixed in API.md and openapi.yaml, and a decision record `0011` captures the findings.
   - **Depends on:** nothing
 
-- [ ] **P0-06 Scaffold the Next.js app** · `infra` · M
+- [x] **P0-06 Scaffold the Next.js app** · `infra` · M
   - **Goal:** Set up Next.js (App Router) with strict TypeScript, Tailwind, ESLint, Prettier and Vitest. Add the `lib/` folders (`ledger`, `policy`, `breaker`, `x402`, `paypal`, `llm`, `db`), env validation with zod that fails fast on a missing variable, and the npm scripts `dev`, `build`, `lint`, `typecheck`, `test`, `db:migrate`, `seed`.
   - **Done when:** `npm run dev` serves a placeholder page, every script runs, and the "Run it locally" section of README is filled in.
   - **Depends on:** P0-01

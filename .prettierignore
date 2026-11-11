@@ -1,0 +1,9 @@
+node_modules/
+.next/
+out/
+coverage/
+package-lock.json
+next-env.d.ts
+# Hand-written docs and specs keep their own formatting.
+*.md
+openapi.yaml

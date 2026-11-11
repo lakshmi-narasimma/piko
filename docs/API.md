@@ -96,6 +96,8 @@ The agent does not send the bare JWT. It sends an x402 `PaymentPayload` with the
 ```
 `accepted` must equal one of the offered `accepts[]` entries, and the receipt's `nonce` and `amount` must match it.
 
+**Retrying `/api/pay`.** Paying is safe to retry. If the same agent pays the same nonce again while its hold is active and before the gateway (or facilitator) has started using it, `/api/pay` returns the same receipt with the same `expiresAt` and holds the amount only once. Another agent of the same org gets `410 challenge_expired`, and an agent of another org gets `403 challenge_buyer_mismatch`. Once a Call has started on the receipt, a retry gets `410`.
+
 ### Settlement (`SettlementResponse`, the `PAYMENT-RESPONSE` header)
 After the upstream response:
 - **2xx–4xx:** the Call is **paid**, and the three ledger entries are written in one transaction. The header decodes to:
@@ -146,7 +148,10 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 |---|---|---|
 | 400 | `invalid_request` | The body is not JSON with a string `nonce` |
 | 404 | `not_found` | No Challenge has this nonce |
-| 403 | `challenge_buyer_mismatch` | The Challenge was issued with a Key from a different buyer org |
+| 403 | `challenge_buyer_mismatch` | The Challenge was issued with a Key from a different buyer org, or another org has already reserved it |
+| 500 | `internal_error` | Something unexpected failed. The cause is logged on the server, never returned |
+
+The gateway never issues a $0 Challenge (a $0 endpoint is forwarded free, see §2), so `invalid_amount` from `/api/pay` only means bad data.
 
 `POST /api/pay` must see the challenge before the funds check, so a stale nonce gets 410 even with an empty wallet.
 

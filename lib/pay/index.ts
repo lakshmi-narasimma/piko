@@ -78,6 +78,12 @@ const LEDGER_ERRORS: Partial<Record<LedgerErrorCode, [number, string, string]>> 
   challenge_expired: [410, "challenge_expired", "This Challenge has expired."],
   challenge_consumed: [410, "challenge_expired", "This Challenge has already been used."],
   challenge_already_reserved: [410, "challenge_expired", "This Challenge has already been used."],
+  challenge_buyer_mismatch: [
+    403,
+    "challenge_buyer_mismatch",
+    "This Challenge was issued to a different buyer.",
+  ],
+  // The gateway never issues a $0 Challenge, so this only guards against bad data.
   invalid_amount: [400, "invalid_amount", "This Challenge has no amount to pay."],
 };
 
@@ -151,7 +157,7 @@ const loadPayableChallenge: PayStep = {
     context.nonce = nonce;
     const challenge = await loadChallenge(context.db, nonce);
     if (!challenge) throw new PayError(404, "not_found", "No Challenge has this nonce.");
-    // Set only when the Challenge was issued with a Key; it is never overwritten here.
+    // A cheap early answer. reserveFunds makes the same check under the Challenge lock.
     if (challenge.buyerOrgId && challenge.buyerOrgId !== context.agent!.orgId) {
       throw new PayError(
         403,
@@ -185,6 +191,7 @@ const issueReceipt: PayStep = {
   async run(context) {
     const { config, challenge, reservation, agent } = context;
     // The JWT's expiry can't outlive the hold: the same instant, rounded down to a second.
+    // A retry gets the same hold back, so it gets the very same Receipt.
     const exp = Math.floor(reservation!.reservationExpiresAt.getTime() / 1000);
     const amount = reservation!.amountMicro.toString();
     const receipt = signReceipt(
@@ -245,12 +252,17 @@ export function payErrorResponse(error: unknown): Response {
   throw error;
 }
 
-/** Handles `POST /api/pay`. */
+/**
+ * Handles `POST /api/pay`. An unexpected failure is logged here and answered with the
+ * documented error body, `500 internal_error`, never with its details.
+ */
 export async function handlePayRequest(deps: PayDeps, request: Request): Promise<Response> {
   const body: unknown = await request.json().catch(() => null);
   try {
     return Response.json(await runPayPipeline(deps, request.headers, body));
   } catch (error) {
-    return payErrorResponse(error);
+    if (error instanceof PayError) return payErrorResponse(error);
+    console.error("POST /api/pay failed", error);
+    return jsonError(500, "internal_error", "Something went wrong. Nothing was charged.");
   }
 }

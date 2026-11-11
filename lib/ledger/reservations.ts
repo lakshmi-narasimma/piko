@@ -22,6 +22,11 @@ export interface Reservation {
   buyerOrgId: string;
   amountMicro: bigint;
   reservationExpiresAt: Date;
+  /**
+   * True when this agent already held this Challenge and nothing has used the hold yet:
+   * the existing hold is returned unchanged, so a retried payment gets the same Receipt.
+   */
+  reissued: boolean;
 }
 
 export interface SettledCall extends PostedCall {
@@ -123,10 +128,17 @@ export async function availableFunds(db: DbOrTx, orgId: string): Promise<bigint>
  * Postgres default: inside a caller's REPEATABLE READ or SERIALIZABLE transaction it
  * throws, because that snapshot could hide a concurrent reservation.
  *
+ * A Challenge bound to a buyer org (issued with a Key, or reserved before) can only be
+ * reserved by that org; the check runs under the Challenge lock, so every caller gets it.
+ * Reserving again during an active hold that the same agent took, and that nothing has
+ * claimed yet, returns that hold unchanged (`reissued: true`) instead of failing, so a
+ * retried payment is safe. A hold is unclaimed while it still ends exactly `ttlSeconds`
+ * after it started: claiming it for a Call moves its expiry.
+ *
  * @throws InsufficientFundsError when the org can't cover the amount.
  * @throws LedgerError `org_not_found`, `invalid_amount`, `challenge_not_found`,
- *   `challenge_consumed`, `challenge_expired`, `challenge_already_reserved` or
- *   `unsupported_isolation`.
+ *   `challenge_buyer_mismatch`, `challenge_consumed`, `challenge_expired`,
+ *   `challenge_already_reserved` or `unsupported_isolation`.
  */
 export function reserveFunds(db: DbOrTx, input: ReserveFundsInput): Promise<Reservation> {
   const { nonce, agentId, buyerOrgId, ttlSeconds } = input;
@@ -136,15 +148,40 @@ export function reserveFunds(db: DbOrTx, input: ReserveFundsInput): Promise<Rese
 
     const [challenge] = await lockChallenge(tx, nonce);
     if (!challenge) throw challengeNotFound(nonce);
-    if (challenge.consumedAt) throw challengeConsumed(nonce);
-    if (challenge.expired) {
-      throw new LedgerError("challenge_expired", `Challenge ${nonce} has expired.`);
+    if (challenge.buyerOrgId && challenge.buyerOrgId !== buyerOrgId) {
+      throw new LedgerError(
+        "challenge_buyer_mismatch",
+        `Challenge ${nonce} belongs to a different buyer.`,
+      );
     }
+    if (challenge.consumedAt) throw challengeConsumed(nonce);
+    // Before the expiry check: a hold outlives its Challenge's expiry, and a retry during it
+    // must still get its Receipt back.
     if (challenge.reservationActive) {
+      const [hold] = await tx
+        .select({
+          reservationExpiresAt: challenges.reservationExpiresAt,
+          unclaimed: sql<boolean>`${challenges.reservationExpiresAt} = ${challenges.reservedAt} + make_interval(secs => ${ttlSeconds})`,
+        })
+        .from(challenges)
+        .where(eq(challenges.nonce, nonce));
+      if (challenge.agentId === agentId && hold!.unclaimed) {
+        return {
+          nonce,
+          agentId,
+          buyerOrgId,
+          amountMicro: challenge.amountMicro,
+          reservationExpiresAt: hold!.reservationExpiresAt!,
+          reissued: true,
+        };
+      }
       throw new LedgerError(
         "challenge_already_reserved",
         `Challenge ${nonce} already holds a reservation.`,
       );
+    }
+    if (challenge.expired) {
+      throw new LedgerError("challenge_expired", `Challenge ${nonce} has expired.`);
     }
     if (challenge.amountMicro <= 0n) {
       throw new LedgerError("invalid_amount", "A reservation must have a positive amount.");
@@ -155,13 +192,15 @@ export function reserveFunds(db: DbOrTx, input: ReserveFundsInput): Promise<Rese
       throw new InsufficientFundsError(challenge.amountMicro, available);
     }
 
+    // Both from one instant, so an unclaimed hold ends exactly ttlSeconds after it started.
+    const reservedAt = sql`statement_timestamp()`;
     const [reserved] = await tx
       .update(challenges)
       .set({
         agentId,
         buyerOrgId,
-        reservedAt: now,
-        reservationExpiresAt: sql`${now} + make_interval(secs => ${ttlSeconds})`,
+        reservedAt,
+        reservationExpiresAt: sql`${reservedAt} + make_interval(secs => ${ttlSeconds})`,
       })
       .where(eq(challenges.nonce, nonce))
       .returning({ reservationExpiresAt: challenges.reservationExpiresAt });
@@ -172,6 +211,7 @@ export function reserveFunds(db: DbOrTx, input: ReserveFundsInput): Promise<Rese
       buyerOrgId,
       amountMicro: challenge.amountMicro,
       reservationExpiresAt: reserved!.reservationExpiresAt!,
+      reissued: false,
     };
   });
 }

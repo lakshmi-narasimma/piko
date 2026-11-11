@@ -519,10 +519,88 @@ describe.skipIf(!url)("ledger", () => {
 
       const reserved = await createChallenge(s.endpointId, 2000n);
       await reserve(reserved);
-      expect(await codeOf(reserve(reserved))).toBe("challenge_already_reserved");
+      const [otherAgent] = await db
+        .insert(agents)
+        .values({ orgId: s.buyerOrgId, name: `agent-${randomUUID()}` })
+        .returning({ id: agents.id });
+      expect(
+        await codeOf(
+          reserveFunds(db, {
+            nonce: reserved,
+            agentId: otherAgent!.id,
+            buyerOrgId: s.buyerOrgId,
+            ttlSeconds: 60,
+          }),
+        ),
+      ).toBe("challenge_already_reserved");
 
       await settleCall(db, { nonce: reserved, callId: randomUUID() });
       expect(await codeOf(reserve(reserved))).toBe("challenge_consumed");
+    });
+
+    it("returns the same hold when the same agent reserves again before it is used", async () => {
+      const s = await createScenario(10_000n);
+      const nonce = await createChallenge(s.endpointId, 2000n);
+      const reserve = () =>
+        reserveFunds(db, { nonce, agentId: s.agentId, buyerOrgId: s.buyerOrgId, ttlSeconds: 60 });
+
+      const first = await reserve();
+      // The hold outlives the Challenge's own expiry, and a retry must still work.
+      await db
+        .update(challenges)
+        .set({ expiresAt: new Date(Date.now() - 1000) })
+        .where(eq(challenges.nonce, nonce));
+      const again = await reserve();
+
+      expect(first.reissued).toBe(false);
+      expect(again).toEqual({ ...first, reissued: true });
+      expect(await availableFunds(db, s.buyerOrgId)).toBe(8000n);
+    });
+
+    it("does not hand back a hold whose expiry has moved, or one that ended", async () => {
+      const s = await createScenario(10_000n);
+      const reserve = (nonce: string) =>
+        reserveFunds(db, { nonce, agentId: s.agentId, buyerOrgId: s.buyerOrgId, ttlSeconds: 60 });
+
+      const claimed = await createChallenge(s.endpointId, 2000n);
+      await reserve(claimed);
+      // What claiming the hold for a Call does: its expiry moves past the Receipt's.
+      await db
+        .update(challenges)
+        .set({ reservationExpiresAt: sql`reservation_expires_at + interval '2 seconds'` })
+        .where(eq(challenges.nonce, claimed));
+      expect(await codeOf(reserve(claimed))).toBe("challenge_already_reserved");
+
+      const ended = await createChallenge(s.endpointId, 2000n);
+      const first = await reserve(ended);
+      await expireReservation(ended);
+      const fresh = await reserve(ended);
+      expect(fresh.reissued).toBe(false);
+      expect(fresh.reservationExpiresAt.getTime()).toBeGreaterThan(
+        first.reservationExpiresAt.getTime(),
+      );
+    });
+
+    it("only lets the buyer org a Challenge is bound to reserve it", async () => {
+      const s = await createScenario(10_000n);
+      const other = await createScenario(10_000n);
+      const reserve = (buyer: { agentId: string; buyerOrgId: string }, nonce: string) =>
+        reserveFunds(db, { nonce, ...buyer, ttlSeconds: 60 });
+
+      const keyed = await createChallenge(s.endpointId, 2000n);
+      await db
+        .update(challenges)
+        .set({ buyerOrgId: s.buyerOrgId, agentId: s.agentId })
+        .where(eq(challenges.nonce, keyed));
+      expect(await codeOf(reserve(other, keyed))).toBe("challenge_buyer_mismatch");
+      await expect(reserve(s, keyed)).resolves.toMatchObject({ reissued: false });
+
+      // A hold binds an anonymous Challenge to its payer, even after the hold ends.
+      const anonymous = await createChallenge(s.endpointId, 2000n);
+      await reserve(s, anonymous);
+      await expireReservation(anonymous);
+      expect(await codeOf(reserve(other, anonymous))).toBe("challenge_buyer_mismatch");
+      expect(await availableFunds(db, other.buyerOrgId)).toBe(10_000n);
     });
 
     it("rejects an unknown org", async () => {

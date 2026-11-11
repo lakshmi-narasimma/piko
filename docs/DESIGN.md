@@ -93,7 +93,7 @@ Not claimed as unique: no-code paywalls for MCP tools, and refunds when a call f
 - **AI pricing help:** the seller pastes docs or an OpenAPI spec. Gemini suggests per-endpoint prices and writes the directory listing.
 - **Enterprise rates:** a per-buyer-org price override table ("Acme pays $0.003, everyone else $0.005").
 - **Analytics:** calls, revenue per endpoint, top calling agents and orgs, and how many 402 responses turn into paid calls.
-- **Automatic refunds:** if the seller's upstream returns 5xx or times out, the buyer's charge is reversed on the ledger.
+- **Automatic refunds:** if the seller's upstream returns 5xx or times out, the buyer isn't charged: the reservation is released and nothing is posted to the ledger.
 - **Payouts:** automatic once the balance reaches **$1.00**, plus a manual "Withdraw" button, through PayPal Payouts.
 
 ### 5.3 Directory
@@ -173,35 +173,35 @@ Sum of org's call debits for the period → Invoicing v2 create + send (line ite
 Orgs have a **credit limit**. If the invoice is unpaid past the limit, the org's keys are paused.
 
 ### 7.5 Refund on failure
-Upstream 5xx or timeout (default 10 s) → reverse that call's three ledger entries → the agent receives a 502 with `refunded: true`.
+Upstream 5xx or timeout (default 10 s) → release the reservation (in the `authorization` flow nothing is posted before the upstream answers, so there are no entries to reverse) → mark the Call refunded → the agent receives a 502 with `refunded: true`. Three reversing entries are only for refunding a Call that was already settled.
 
 ## 8. x402-style protocol
 
 Piko follows x402's shape (HTTP 402 → pay → retry with proof) and acts as the **facilitator** for a new payment scheme.
 
-- **Scheme:** `paypal-ledger` · **network:** `paypal:sandbox` (or `paypal:live`).
-- **402 body (challenge):**
+- **Scheme:** `paypal-ledger` · **network:** `paypal:sandbox` (or `paypal:live`). The network id follows the CAIP-2 `namespace:reference` shape that x402 v2 asks non-blockchain networks to use.
+- **402 challenge** (x402 v2 `PaymentRequired`, base64 JSON in the `PAYMENT-REQUIRED` header and repeated as the body):
   ```json
   {
     "x402Version": 2,
+    "resource": { "url": "https://<app>/g/priya/history", "description": "Price history for one product", "mimeType": "application/json" },
     "accepts": [{
       "scheme": "paypal-ledger",
       "network": "paypal:sandbox",
-      "maxAmountRequired": "2000",
-      "asset": "USD-micro",
-      "payTo": "seller_priya",
-      "resource": "https://<app>/g/priya/history",
-      "description": "Price history for one product",
-      "nonce": "c_8f…",
-      "expiresAt": "2026-11-10T12:00:30Z",
-      "facilitator": "https://<app>/api/facilitator"
+      "amount": "2000",
+      "asset": "USD",
+      "payTo": "priya",
+      "maxTimeoutSeconds": 60,
+      "extra": { "decimals": 6, "nonce": "c_8f…", "expiresAt": "2026-11-10T12:00:30Z", "facilitator": "https://<app>/api/facilitator", "payUrl": "https://<app>/api/pay" }
     }]
   }
   ```
-- **Facilitator endpoints:** `GET /api/facilitator/supported`, `POST /api/facilitator/verify`, `POST /api/facilitator/settle`. The hosted gateway calls these internally, and an external seller could call them too.
-- **Receipt:** a JWT signed with a server key containing `{nonce, buyerAgent, seller, endpoint, amount, exp}`. It's **single-use** (the nonce is stored and consumed on settle) and expires in 60 s.
-- **Headers:** follow the current x402 version's names (v2 uses `PAYMENT-REQUIRED` / `PAYMENT-SIGNATURE` / `PAYMENT-RESPONSE`). Check the exact names against the x402-foundation spec at build time.
-- **Open:** the spec's rules for registering a new scheme (see §19).
+  `amount` is in micro-USD (`extra.decimals: 6`), so `"2000"` is $0.002. This deviates from the spec's `cloudflare:402` precedent, which puts USD `amount` in cents. Piko's own fields live in `extra`, which x402 reserves for scheme-specific data.
+- **Facilitator endpoints:** `GET /api/facilitator/supported`, `POST /api/facilitator/verify`, `POST /api/facilitator/settle`, with the x402 v2 request and response shapes (API.md §3). The hosted gateway calls these internally, and an external seller could call them too.
+- **Receipt:** a JWT signed with a server key containing `{nonce, agentId, orgId, sellerId, endpointId, amount, exp}` (the same claims as API.md §2). It's **single-use** (the nonce is stored and consumed on settle) and expires after `RECEIPT_TTL_SECONDS` (default 60 s). The agent sends it wrapped in an x402 `PaymentPayload` (`payload: { receipt }`).
+- **Headers:** confirmed against the x402 v2 HTTP transport spec: `PAYMENT-REQUIRED` (402 → agent), `PAYMENT-SIGNATURE` (agent → gateway), `PAYMENT-RESPONSE` (gateway → agent, a `SettlementResponse` whose `transaction` is the Call id). All three are base64-encoded JSON.
+- **Flow:** x402's default `authorization` flow (verify → call upstream → settle), which matches "refund on upstream failure".
+- **Registration:** none is needed. x402 has no scheme or network registry; any string works. The core spec doesn't say what a client does with an `accepts[]` entry it can't pay (it only says a client SHOULD skip an unknown `extra.paymentFlow`), so a client without `paypal-ledger` support simply can't pay this one. Getting `paypal-ledger` into the official repo is optional: open an issue, then a PR with `specs/schemes/paypal-ledger/scheme_paypal_ledger.md` from the template. Details in [decision 0011](decisions/0011-x402-v2-and-gemini-model.md).
 
 ## 9. Policy engine, budgets and circuit breaker
 
@@ -233,7 +233,7 @@ The admin sees the compiled rule and must click **Confirm** before it takes effe
 | **Directory embeddings** | Directory | Semantic search over listings | — |
 | *(stretch)* Spend analyst | Org console | "Why did costs spike?" chat over spend data | Read-only |
 
-**Model:** the current Gemini Flash model on the **free tier** (confirm the model name and rate limits at build time). Behind a small `llm` module so it can be switched to Groq if limits or quality become a problem.
+**Model:** `gemini-3.6-flash` (stable, free tier) for text, tool calling and structured output. When it returns 503 or 429, `lib/llm` tries `gemini-3-flash-preview`, then `gemini-3.5-flash-lite`, then Groq. Free-tier quotas are per project **and per model**, so this chain also widens the daily allowance. Embeddings use `gemini-embedding-2` at 768 dimensions. The model ids come from env (`GEMINI_MODEL`, `GEMINI_FALLBACK_MODELS`, `GEMINI_EMBEDDING_MODEL`). Pinned ids are used rather than `-latest` aliases, because `gemini-flash-latest` returned 503 on every try on 2026-11-05. All of this goes through the Vercel AI SDK (`@ai-sdk/google`). See [decision 0011](decisions/0011-x402-v2-and-gemini-model.md) for limits and sources.
 
 ## 11. Architecture
 
@@ -383,9 +383,9 @@ If time runs out, whatever is later in this list is cut first. Steps 1–6 alone
 - [ ] **Demo video script.** Deferred until the build exists. Working scene order: problem → seller goes live → buyer tops up and agent buys → org policy, approval and kill switch → payout and invoice land → close.
 - [ ] **Public GitHub repo + MIT licence.** Deferred. It must be public with the licence visible before submission.
 - [ ] **PayPal Usage-based Billing access.** Ask on the PayPal hackathon Discord.
-- [ ] **x402 custom-scheme rules.** Read the x402-foundation `specs/` directory.
+- [x] **x402 custom-scheme rules.** Done: there is no registry, and custom fiat schemes and networks are allowed (`cloudflare:402` with `USD` is a precedent in the spec). The v2 field names (`amount`, `resource` object, `extra`, `maxTimeoutSeconds`) are now in §8 and API.md. See decision 0011.
 - [ ] **Confirm Payouts is enabled** on the sandbox business app.
-- [ ] **Confirm Gemini free-tier model and limits** at build time.
+- [x] **Confirm Gemini free-tier model and limits.** Done: `gemini-3.6-flash` first, then `gemini-3-flash-preview`, then `gemini-3.5-flash-lite`. Embeddings: `gemini-embedding-2` at 768 dimensions. Google publishes free-tier numbers only in AI Studio. Third-party tables give Flash 5 RPM / 20 RPD and Flash-Lite 10 RPM / 500 RPD. Before judging day, a human must read the real numbers from aistudio.google.com/rate-limit. See decision 0011.
 
 ## 20. Out of scope (this build)
 

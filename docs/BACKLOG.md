@@ -65,7 +65,7 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** The answer is recorded in [DESIGN.md §19](DESIGN.md#19-open-items).
   - **Depends on:** nothing
 
-- [ ] **P0-05 Confirm the x402 v2 details and the Gemini limits** · `research` `docs` · S
+- [x] **P0-05 Confirm the x402 v2 details and the Gemini limits** · `research` `docs` · S
   - **Goal:** Read the x402-foundation `specs/` for v2 header names, payload shapes and the rules for a custom scheme. Confirm the current Gemini Flash model name, its free-tier limits, and the embedding model.
   - **Done when:** Any differences are fixed in API.md and openapi.yaml, and a decision record `0011` captures the findings.
   - **Depends on:** nothing
@@ -370,7 +370,7 @@ Covers TEST_PLAN **F8**.
 Covers TEST_PLAN **F3**, **F11**, and the rest of **F2** and **F10**.
 
 - [ ] **P8-01 Automatic refunds** · `core` · M
-  - **Goal:** An upstream 5xx or timeout writes three reversing entries, marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
+  - **Goal:** An upstream 5xx or timeout releases the Call's reservation without posting any ledger entries (in the `authorization` flow nothing is posted before the upstream answers), marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
   - **Done when:** Every F3 item passes.
   - **Depends on:** P1-10
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { eq } from "drizzle-orm";
 import { vi } from "vitest";
 import type { Db } from "../lib/db/client";
 import { agents, endpoints, ledgerEntries, listings, orgs } from "../lib/db/schema";
@@ -148,6 +149,13 @@ export async function createBuyer(db: Db, fundedMicro = 0n) {
     });
   }
   return { orgId: org!.id, agentId: agent!.id, rawKey: key.rawKey };
+}
+
+/** A paid Call's Ledger entries, in the order buyer, seller, platform. */
+export async function callEntries(db: Db, callId: string) {
+  const rows = await db.select().from(ledgerEntries).where(eq(ledgerEntries.refId, callId));
+  const order = ["wallet", "seller", "platform"];
+  return rows.sort((a, b) => order.indexOf(a.accountType) - order.indexOf(b.accountType));
 }
 
 export function gatewayRequest(

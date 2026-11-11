@@ -216,6 +216,66 @@ export function reserveFunds(db: DbOrTx, input: ReserveFundsInput): Promise<Rese
   });
 }
 
+export interface ClaimReservationInput {
+  nonce: string;
+  agentId: string;
+  buyerOrgId: string;
+  /** The Receipt's `exp` claim, in seconds since the epoch. */
+  receiptExp: number;
+  /** How long the hold must last from now: long enough to read, forward and settle. */
+  holdSeconds: number;
+}
+
+/**
+ * Starts serving a Receipt: the one atomic step that lets a single request through to the
+ * seller, across processes. Returns false if the hold has ended, belongs to another
+ * Receipt, or is already being served.
+ *
+ * A Receipt's `exp` is its hold's expiry rounded down to a second, so a hold whose expiry
+ * is in [exp, exp + 1s) is the one that Receipt was issued for. Claiming moves the expiry
+ * to at least exp + 1s, and to at least `holdSeconds` from now, so the hold covers the whole
+ * upstream call and the same Receipt can't be claimed twice. A Receipt from an earlier hold
+ * on the same Challenge never matches a later one.
+ */
+export async function claimReservation(db: DbOrTx, input: ClaimReservationInput): Promise<boolean> {
+  const { nonce, agentId, buyerOrgId, receiptExp, holdSeconds } = input;
+  const issuedUntil = sql`to_timestamp(${receiptExp + 1})`;
+  const claimed = await db
+    .update(challenges)
+    .set({
+      reservationExpiresAt: sql`greatest(${now} + make_interval(secs => ${holdSeconds}), ${issuedUntil})`,
+    })
+    .where(
+      and(
+        eq(challenges.nonce, nonce),
+        eq(challenges.agentId, agentId),
+        eq(challenges.buyerOrgId, buyerOrgId),
+        isNotNull(challenges.reservedAt),
+        isNull(challenges.consumedAt),
+        gt(challenges.reservationExpiresAt, now),
+        sql`${challenges.reservationExpiresAt} < ${issuedUntil}`,
+      ),
+    )
+    .returning({ nonce: challenges.nonce });
+  return claimed.length > 0;
+}
+
+/**
+ * Ends a Challenge's hold early, for a Call that failed before settling: nothing was
+ * charged, so nothing needs reversing. Writes no Ledger entry. The Challenge expires too,
+ * so it can't be paid again and its Receipt can never become valid again; the agent asks
+ * for a new 402.
+ */
+export async function releaseReservation(db: DbOrTx, nonce: string): Promise<void> {
+  await db
+    .update(challenges)
+    .set({
+      reservationExpiresAt: sql`least(${challenges.reservationExpiresAt}, ${now})`,
+      expiresAt: sql`least(${challenges.expiresAt}, ${now})`,
+    })
+    .where(and(eq(challenges.nonce, nonce), isNull(challenges.consumedAt)));
+}
+
 /**
  * Consumes a Challenge's reservation and posts its Call, atomically. The seller comes
  * from the Challenge's endpoint and the price from its amount, so a caller can't

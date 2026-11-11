@@ -77,10 +77,50 @@ export interface ForwardOptions {
   upstreamSecret?: string | null;
 }
 
-/** The request body to forward, or null for methods that have none. */
-export async function readForwardableBody(request: Request): Promise<ArrayBuffer | null> {
-  if (request.method === "GET" || request.method === "HEAD") return null;
-  return request.arrayBuffer();
+export type ForwardableBody = { ok: true; body: ArrayBuffer | null } | { ok: false };
+
+/**
+ * Reads the request body to forward (null for methods that have none), giving up after
+ * `timeoutMs` so a slow upload can't keep a request open past its payment hold.
+ */
+export async function readForwardableBody(
+  request: Request,
+  timeoutMs: number,
+): Promise<ForwardableBody> {
+  if (request.method === "GET" || request.method === "HEAD") return { ok: true, body: null };
+  if (!request.body) return { ok: true, body: new ArrayBuffer(0) };
+
+  const reader = request.body.getReader();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), timeoutMs);
+  });
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    for (;;) {
+      const next = await Promise.race([reader.read(), deadline]);
+      if (next === "timeout") {
+        void reader.cancel().catch(() => {});
+        return { ok: false };
+      }
+      if (next.done) break;
+      chunks.push(next.value);
+      length += next.value.byteLength;
+    }
+  } catch {
+    return { ok: false };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const body = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, body: body.buffer };
 }
 
 /**

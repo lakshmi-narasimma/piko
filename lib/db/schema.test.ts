@@ -4,7 +4,7 @@ import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type Db } from "./client";
 import * as schema from "./schema";
-import { ledgerEntries, orgs, webhookEvents } from "./schema";
+import { agents, endpoints, ledgerEntries, listings, orgs, teams, webhookEvents } from "./schema";
 
 const url = inject("testDatabaseUrl");
 
@@ -165,5 +165,102 @@ describe.skipIf(!url)("schema in the database", () => {
     expect(
       await failure(db.insert(webhookEvents).values({ ...event, paypalEventId: randomUUID() })),
     ).toContain("webhook_events_once_per_resource");
+  });
+
+  const newOrg = async () => {
+    const [org] = await db
+      .insert(orgs)
+      .values({ name: "Org", slug: `org-${randomUUID()}`, kind: "company", billing: "prepaid" })
+      .returning({ id: orgs.id });
+    return org!.id;
+  };
+
+  const newListing = async (sellerOrgId: string) => {
+    const [listing] = await db
+      .insert(listings)
+      .values({
+        sellerOrgId,
+        slug: `listing-${randomUUID()}`,
+        name: "Listing",
+        description: "For schema tests",
+        baseUrl: "http://localhost:9",
+        kind: "http",
+      })
+      .returning({ id: listings.id });
+    return listing!.id;
+  };
+
+  const newEndpoint = (listingId: string, path: string) =>
+    db
+      .insert(endpoints)
+      .values({ listingId, method: "GET", pathOrTool: path, priceMicro: 1000n })
+      .returning();
+
+  it("keeps an agent's team inside the agent's org, and allows no team", async () => {
+    const otherOrgId = await newOrg();
+    const [team] = await db
+      .insert(teams)
+      .values({ orgId: otherOrgId, name: `team-${randomUUID()}` })
+      .returning({ id: teams.id });
+
+    const crossOrg = db.insert(agents).values({ orgId, teamId: team!.id, name: randomUUID() });
+    expect(await failure(crossOrg)).toContain("agents_team_same_org_fk");
+
+    const sameOrg = await db
+      .insert(agents)
+      .values({ orgId: otherOrgId, teamId: team!.id, name: randomUUID() })
+      .returning();
+    expect(sameOrg[0]?.teamId).toBe(team!.id);
+    const noTeam = await db.insert(agents).values({ orgId, name: randomUUID() }).returning();
+    expect(noTeam[0]?.teamId).toBeNull();
+  });
+
+  it("fills an endpoint's seller from its listing", async () => {
+    const sellerId = await newOrg();
+    const [endpoint] = await newEndpoint(await newListing(sellerId), "/fill");
+    expect(endpoint?.sellerOrgId).toBe(sellerId);
+  });
+
+  it("rejects an endpoint whose seller is not its listing's seller", async () => {
+    const listingId = await newListing(await newOrg());
+    const mismatch = db.insert(endpoints).values({
+      listingId,
+      sellerOrgId: await newOrg(),
+      method: "GET",
+      pathOrTool: "/mismatch",
+      priceMicro: 1000n,
+    });
+    expect(await failure(mismatch)).toContain("endpoints_listing_seller_fk");
+  });
+
+  it("makes a route unique per seller, across that seller's listings", async () => {
+    const sellerId = await newOrg();
+    await newEndpoint(await newListing(sellerId), "/summarise");
+
+    const secondListing = newEndpoint(await newListing(sellerId), "/summarise");
+    expect(await failure(secondListing)).toContain("endpoints_seller_route_unique");
+
+    const otherSeller = await newEndpoint(await newListing(await newOrg()), "/summarise");
+    expect(otherSeller).toHaveLength(1);
+  });
+
+  it("keeps a listing's rating between 0 and 5", async () => {
+    const sellerId = await newOrg();
+    const listing = (rating: string) =>
+      db.insert(listings).values({
+        sellerOrgId: sellerId,
+        slug: `listing-${randomUUID()}`,
+        name: "Rated",
+        description: "For schema tests",
+        baseUrl: "http://localhost:9",
+        kind: "http",
+        rating,
+      });
+    for (const bad of ["-0.1", "5.1"]) {
+      expect(await failure(listing(bad))).toContain("listings_rating_range");
+    }
+    for (const good of ["0.0", "5.0"]) {
+      await expect(listing(good)).resolves.toBeDefined();
+    }
   });
 });

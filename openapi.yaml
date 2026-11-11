@@ -224,6 +224,7 @@ paths:
       tags: [Facilitator]
       operationId: facilitatorVerify
       summary: Check a payment without consuming it (read-only)
+      description: Open to anyone holding the PaymentPayload; the receipt is the credential.
       security: [{}]
       requestBody:
         required: true
@@ -231,18 +232,18 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/FacilitatorRequest" }
       responses:
+        "400":
+          description: |
+            Unusable request body. isValid is false and invalidReason is invalid_payload,
+            invalid_x402_version or invalid_payment_requirements.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerifyResponse" }
         "200":
           description: Verification result
           content:
             application/json:
-              schema:
-                type: object
-                required: [isValid]
-                properties:
-                  isValid: { type: boolean }
-                  invalidReason: { type: string, description: "Machine-readable code, e.g. challenge_expired" }
-                  invalidMessage: { type: string }
-                  payer: { type: string, description: Agent id }
+              schema: { $ref: "#/components/schemas/VerifyResponse" }
 
   /api/facilitator/settle:
     post:
@@ -252,6 +253,8 @@ paths:
       description: |
         Call only after the protected handler succeeded (x402 authorization flow).
         If settle is never called, the reservation is released when the receipt expires.
+        Open to anyone holding the PaymentPayload; the receipt is the credential.
+        Every response, failures included, is an x402 SettlementResponse.
       security: [{}]
       requestBody:
         required: true
@@ -259,12 +262,23 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/FacilitatorRequest" }
       responses:
-        "200":
-          description: Settlement
+        "400":
+          description: |
+            Unusable request body. success is false, transaction is empty and errorReason is
+            invalid_payload, invalid_x402_version or invalid_payment_requirements.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Settlement" }
-        "410": { $ref: "#/components/responses/Error" }
+        "200":
+          description: Settlement; success is false and errorReason is invalid_receipt for a tampered payment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settlement" }
+        "410":
+          description: The receipt expired or was already used; success is false and errorReason is challenge_expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settlement" }
 
 components:
   securitySchemes:
@@ -416,6 +430,16 @@ components:
         x402Version: { type: integer, enum: [2] }
         paymentPayload: { $ref: "#/components/schemas/PaymentPayload" }
         paymentRequirements: { $ref: "#/components/schemas/PaymentRequirement" }
+
+    VerifyResponse:
+      type: object
+      description: x402 v2 VerifyResponse
+      required: [isValid]
+      properties:
+        isValid: { type: boolean }
+        invalidReason: { type: string, description: "Machine-readable code, e.g. challenge_expired or invalid_payload" }
+        invalidMessage: { type: string }
+        payer: { type: string, description: Agent id }
 
     Settlement:
       type: object

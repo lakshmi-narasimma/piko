@@ -144,7 +144,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** The F2 items for a paid retry, a reused receipt and a tampered receipt pass.
   - **Depends on:** P1-09, P1-06
 
-- [ ] **P1-11 Facilitator endpoints** · `core` · S
+- [x] **P1-11 Facilitator endpoints** · `core` · S
   - **Goal:** Add `GET /api/facilitator/supported`, `POST /verify` and `POST /settle`, sharing the gateway's own verify and settle code.
   - **Done when:** The facilitator routes in openapi.yaml match the responses, and a test settles a Call through them.
   - **Depends on:** P1-10

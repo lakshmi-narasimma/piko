@@ -88,7 +88,12 @@ describe.skipIf(!url)("ledger", () => {
       .returning({ id: listings.id });
     const [endpoint] = await db
       .insert(endpoints)
-      .values({ listingId: listing!.id, method: "GET", pathOrTool: "/x", priceMicro: 2000n })
+      .values({
+        listingId: listing!.id,
+        method: "GET",
+        pathOrTool: `/x-${randomUUID()}`,
+        priceMicro: 2000n,
+      })
       .returning({ id: endpoints.id });
     const [agent] = await db
       .insert(agents)

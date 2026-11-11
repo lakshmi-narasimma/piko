@@ -30,6 +30,7 @@ export const TEST_GATEWAY_CONFIG: GatewayConfig = {
   network: "paypal:sandbox",
   challengeTtlSeconds: 30,
   receiptTtlSeconds: 60,
+  receiptSigningSecret: "test-receipt-secret",
   upstreamTimeoutMs: 2_000,
 };
 

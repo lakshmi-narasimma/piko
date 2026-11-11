@@ -90,6 +90,9 @@ paths:
       tags: [Payments]
       operationId: pay
       summary: Authorise payment for a challenge and get a receipt
+      description: |
+        Safe to retry: the same agent paying the same nonce again, while its hold is
+        active and unused, gets the same receipt and the amount is held once.
       requestBody:
         required: true
         content:
@@ -110,12 +113,15 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "402": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
         "423": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
 
   /api/approvals/{id}:
     get:
@@ -423,6 +429,6 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, upstream_failed, not_found]
+              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, challenge_buyer_mismatch, upstream_failed, not_found, invalid_request, invalid_amount, internal_error]
             message: { type: string }
           additionalProperties: true

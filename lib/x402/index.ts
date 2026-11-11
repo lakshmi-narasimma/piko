@@ -44,11 +44,20 @@ export interface PaymentRequired {
   accepts: PaymentRequirements[];
 }
 
+export interface PaymentPayload {
+  x402Version: number;
+  resource?: ResourceInfo;
+  accepted: PaymentRequirements;
+  payload: { receipt: string };
+}
+
 export interface X402Config {
   appBaseUrl: string;
   network: `paypal:${Env["PAYPAL_ENV"]}`;
   challengeTtlSeconds: number;
   receiptTtlSeconds: number;
+  /** Signs Receipts (HS256). Never log it. */
+  receiptSigningSecret: string;
 }
 
 export function x402ConfigFromEnv(env: Env = getEnv()): X402Config {
@@ -57,6 +66,7 @@ export function x402ConfigFromEnv(env: Env = getEnv()): X402Config {
     network: `paypal:${env.PAYPAL_ENV}`,
     challengeTtlSeconds: env.CHALLENGE_TTL_SECONDS,
     receiptTtlSeconds: env.RECEIPT_TTL_SECONDS,
+    receiptSigningSecret: env.RECEIPT_SIGNING_SECRET,
   };
 }
 

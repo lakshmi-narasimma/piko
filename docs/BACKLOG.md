@@ -55,7 +55,7 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** The client id and secret are in `.env.local`, and the checklist items for steps 1–6 are ticked.
   - **Depends on:** nothing
 
-- [ ] **P0-03 Get the other keys and the database** · `human` `infra` · S
+- [x] **P0-03 Get the other keys and the database** · `human` `infra` · S
   - **Goal:** Get the Gemini key, the Channel3 key, a Neon database with `CREATE EXTENSION vector`, and the generated secrets (PAYPAL_SETUP.md steps 7–9).
   - **Done when:** `.env.local` has every value from `.env.example` except the webhook id and the Render URL.
   - **Depends on:** nothing
@@ -370,7 +370,7 @@ Covers TEST_PLAN **F8**.
 Covers TEST_PLAN **F3**, **F11**, and the rest of **F2** and **F10**.
 
 - [ ] **P8-01 Automatic refunds** · `core` · M
-  - **Goal:** An upstream 5xx or timeout writes three reversing entries, marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
+  - **Goal:** An upstream 5xx or timeout releases the Call's reservation without posting any ledger entries (in the `authorization` flow nothing is posted before the upstream answers), marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
   - **Done when:** Every F3 item passes.
   - **Depends on:** P1-10
 

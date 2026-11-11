@@ -28,7 +28,7 @@ import {
   readForwardableBody,
   type UpstreamResult,
 } from "./forward";
-import { claimFreeCall, completeFreeCall, releaseFreeCall } from "./free";
+import { claimFreeCall, completeFreeCall, recordZeroPriceCall, releaseFreeCall } from "./free";
 import { IDEMPOTENCY_KEY_HEADER, idempotentChallenge, idempotentReplay } from "./idempotency";
 import { findRoute, type GatewayRoute } from "./route";
 import {
@@ -103,17 +103,18 @@ function upstreamResponse(result: Extract<UpstreamResult, { ok: true }>): Respon
 
 /**
  * Runs a free Call: forwards upstream and records it. An upstream failure gives the free
- * Call back and charges nothing.
+ * Call back and charges nothing. `callId` is null for a caller with no Key on a $0
+ * Endpoint: there is no buyer to record the Call against.
  */
 async function serveFreeCall(
   { db, config }: GatewayDeps,
   route: GatewayRoute,
   request: Request,
-  callId: string,
+  callId: string | null,
 ): Promise<Response> {
   const body = await readForwardableBody(request, bodyTimeoutMs(config));
   if (!body.ok) {
-    await releaseFreeCall(db, callId);
+    if (callId) await releaseFreeCall(db, callId);
     return bodyTimedOut();
   }
   const result = await forwardUpstream(route, request, body.body, {
@@ -121,15 +122,17 @@ async function serveFreeCall(
     upstreamSecret: null,
   });
   if (!result.ok) {
-    await releaseFreeCall(db, callId);
+    if (callId) await releaseFreeCall(db, callId);
     return jsonError(502, "upstream_failed", "The upstream API failed. Nothing was charged.", {
       refunded: false,
     });
   }
-  await completeFreeCall(db, callId, {
-    upstreamStatus: result.status,
-    latencyMs: result.latencyMs,
-  });
+  if (callId) {
+    await completeFreeCall(db, callId, {
+      upstreamStatus: result.status,
+      latencyMs: result.latencyMs,
+    });
+  }
   return upstreamResponse(result);
 }
 
@@ -281,6 +284,12 @@ async function handle(
     if (!auth.ok) return jsonError(401, "invalid_key", "Missing, wrong or revoked key.");
     buyer = auth;
     if (buyer.frozenScope) return agentFrozen(buyer);
+  }
+
+  // A $0 Endpoint is always free: there is nothing to pay, so no Challenge.
+  if (route.priceMicro === 0n) {
+    const callId = buyer ? await recordZeroPriceCall(db, route, buyer) : null;
+    return serveFreeCall(deps, route, request, callId);
   }
 
   if (buyer && route.freeQuota > 0) {

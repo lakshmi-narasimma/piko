@@ -9,6 +9,7 @@ export type LedgerErrorCode =
   | "challenge_expired"
   | "challenge_consumed"
   | "challenge_already_reserved"
+  | "challenge_buyer_mismatch"
   | "reservation_not_active"
   | "unsupported_isolation";
 

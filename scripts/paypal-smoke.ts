@@ -18,7 +18,7 @@ if (!clientId || !clientSecret) {
   process.exit(1);
 }
 
-async function main() {
+async function main(clientId: string, clientSecret: string) {
   const paypal = new PayPalClient({
     baseUrl: PAYPAL_BASE_URL.sandbox,
     clientId,
@@ -36,7 +36,7 @@ async function main() {
   console.log("ok");
 }
 
-main().catch((error: unknown) => {
+main(clientId, clientSecret).catch((error: unknown) => {
   console.error(error);
   process.exit(1);
 });

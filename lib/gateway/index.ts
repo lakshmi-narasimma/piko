@@ -9,6 +9,7 @@ import { getEnv } from "../env";
 import { jsonError } from "../http";
 import { authenticateRequest, type AuthenticatedAgent } from "../keys";
 import { claimReservation, releaseReservation } from "../ledger";
+import { payErrorResponse, PayError, runPayPipeline, type IssuedReceipt } from "../pay";
 import {
   decodeHeaderValue,
   encodeHeaderValue,
@@ -28,6 +29,7 @@ import {
   type UpstreamResult,
 } from "./forward";
 import { claimFreeCall, completeFreeCall, recordZeroPriceCall, releaseFreeCall } from "./free";
+import { IDEMPOTENCY_KEY_HEADER, idempotentChallenge, idempotentReplay } from "./idempotency";
 import { findRoute, type GatewayRoute } from "./route";
 import {
   settlePayment,
@@ -67,6 +69,7 @@ const CORS_HEADERS: Record<string, string> = {
     "Content-Type",
     "Authorization",
     AUTOPAY_HEADER,
+    IDEMPOTENCY_KEY_HEADER,
   ].join(", "),
   "Access-Control-Expose-Headers": [PAYMENT_REQUIRED_HEADER, PAYMENT_RESPONSE_HEADER].join(", "),
 };
@@ -208,6 +211,47 @@ async function servePaidCall(
   return withPaymentResponse(upstreamResponse(result), settlement.response);
 }
 
+/**
+ * Runs the whole x402 loop inside one request: Challenge, then the pay pipeline, then the
+ * same verify, forward and settle path a client's own retry takes. It charges once, and
+ * with an Idempotency-Key a retry of the same request charges nothing more.
+ */
+async function serveAutopay(
+  deps: GatewayDeps,
+  route: GatewayRoute,
+  request: Request,
+  buyer: AuthenticatedAgent,
+): Promise<Response> {
+  const key = request.headers.get(IDEMPOTENCY_KEY_HEADER);
+  let nonce: string;
+  if (key === null) {
+    ({ nonce } = await issueChallenge(deps.db, deps.config, route, buyer));
+  } else {
+    const challenge = await idempotentChallenge(deps, route, buyer, key);
+    if (!challenge.ok) return challenge.response;
+    nonce = challenge.nonce;
+  }
+
+  let issued: IssuedReceipt;
+  try {
+    // The buyer is already authenticated. No headers, so no pay step reads the gateway's.
+    issued = await runPayPipeline(deps, new Headers(), { nonce }, buyer);
+  } catch (error) {
+    // A concurrent request with the same key reserved the Challenge first.
+    if (key !== null && error instanceof PayError && error.status === 410) {
+      const replay = await idempotentReplay(deps.db, nonce);
+      if (replay) return replay;
+    }
+    return payErrorResponse(error);
+  }
+
+  const verified = await verifyPayment(deps, decodeHeaderValue(issued.paymentSignature), {
+    endpointId: route.endpointId,
+  });
+  if (!verified.ok) return paymentRejected(verified);
+  return servePaidCall(deps, route, request, verified.claims);
+}
+
 async function handle(
   deps: GatewayDeps,
   request: Request,
@@ -251,6 +295,11 @@ async function handle(
   if (buyer && route.freeQuota > 0) {
     const callId = await claimFreeCall(db, route, buyer);
     if (callId) return serveFreeCall(deps, route, request, callId);
+  }
+
+  if (request.headers.get(AUTOPAY_HEADER)?.toLowerCase() === "true") {
+    if (!buyer) return jsonError(401, "invalid_key", "X-Piko-Autopay needs an agent Key.");
+    return serveAutopay(deps, route, request, buyer);
   }
 
   const { paymentRequired } = await issueChallenge(db, config, route, buyer);

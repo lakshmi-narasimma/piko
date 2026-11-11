@@ -54,6 +54,8 @@ export async function issueChallenge(
   config: X402Config,
   route: GatewayRoute,
   buyer: ChallengeBuyer | null,
+  /** A caller-chosen nonce, for an autopay Idempotency-Key. Random by default. */
+  options: { nonce?: string } = {},
 ): Promise<IssuedChallenge> {
   if (Math.random() < PRUNE_PROBABILITY) {
     // Housekeeping must never cost the caller their 402.
@@ -62,7 +64,7 @@ export async function issueChallenge(
     });
   }
 
-  const nonce = `c_${randomBytes(16).toString("base64url")}`;
+  const nonce = options.nonce ?? `c_${randomBytes(16).toString("base64url")}`;
   const [row] = await db
     .insert(challenges)
     .values({

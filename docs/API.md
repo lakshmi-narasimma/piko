@@ -33,9 +33,13 @@ Piko speaks x402 v2 over HTTP ([core spec](https://github.com/x402-foundation/x4
 
 All three headers carry **base64-encoded JSON** (standard base64 of the UTF-8 JSON text). The names are the x402 v2 ones, confirmed against the spec: `PAYMENT-REQUIRED` (server → client), `PAYMENT-SIGNATURE` (client → server), `PAYMENT-RESPONSE` (server → client). The v1 names `X-PAYMENT` / `X-PAYMENT-RESPONSE` are not used. Per the spec, the header is the canonical location; the JSON body copy on the 402 is a Piko convenience.
 
-**CORS:** for browser callers, the gateway exposes `PAYMENT-REQUIRED` and `PAYMENT-RESPONSE` in `Access-Control-Expose-Headers`, allows `PAYMENT-SIGNATURE`, `Content-Type`, `Authorization` and `X-Piko-Autopay` in `Access-Control-Allow-Headers`, and answers the `OPTIONS` preflight without asking for payment.
+**CORS:** for browser callers, the gateway exposes `PAYMENT-REQUIRED` and `PAYMENT-RESPONSE` in `Access-Control-Expose-Headers`, allows `PAYMENT-SIGNATURE`, `Content-Type`, `Authorization`, `X-Piko-Autopay` and `Idempotency-Key` in `Access-Control-Allow-Headers`, and answers the `OPTIONS` preflight without asking for payment.
 
-**Shortcut:** an agent may send its key on the first gateway request with `X-Piko-Autopay: true`. Piko then runs steps 1–3 internally and returns the upstream response directly. The playground agent and the MCP server use this. The three-step flow exists for x402 compatibility and the demo.
+**Shortcut:** an agent may send its key on the first gateway request with `X-Piko-Autopay: true`. Piko then runs steps 1–3 internally and returns the upstream response directly. The playground agent and the MCP server use this. The three-step flow exists for x402 compatibility and the demo. Any error from §4 comes back as that error, for example `402 insufficient_funds`, and nothing is forwarded. Without a Key it returns `401 invalid_key`. A free-allowance Call stays free. Only the exact value `true` (any case) turns it on; any other value is an ordinary request and gets the 402.
+
+- **Retries and `Idempotency-Key`.** Without a key, every autopay request is a new Challenge, so a client that loses a paid response and retries pays twice. Send `Idempotency-Key: <1–255 chars>` to make the retry safe. The key, scoped to the agent and the Endpoint, picks the Challenge, so a retry with the same key reuses it: if that Challenge was already paid, the retry gets `409 idempotent_replay` with `callId` and `upstreamStatus` and nothing is charged or forwarded (Piko does not store upstream bodies, so it can't replay one); while the first request is still being served it gets `409 idempotency_in_progress`; if the first one stopped before reserving (for example `402 insufficient_funds`), the retry pays that same Challenge. If the first one failed after reserving (a 5xx, a timeout or a 408), its Challenge is expired, so the retry gets `410 challenge_expired`; send a new key to try again. A free-allowance Call ignores the key. The header is forwarded to the seller like any other.
+- **Approvals (Phase 5, P5-04).** With autopay the agent never sees the Challenge nonce, so it couldn't finish a payment that a human approves. When P5-04 adds `202 approval_pending`, an autopay 202 must include the Challenge `nonce` alongside `approvalId` and `approvalUrl`, so that once the approval is granted the agent can `POST /api/pay` with that nonce and retry with `PAYMENT-SIGNATURE`, or repeat the autopay request with the same `Idempotency-Key`. No pay step returns 202 yet.
+- **Slow uploads.** The request body is read after the funds are reserved, but the gateway claims the hold first and stretches it to cover the body deadline, the upstream timeout and settling, so a slow upload hits `408 request_timeout` (nothing charged), never the receipt's expiry.
 
 ### Challenge (`PaymentRequired`, the 402)
 ```json
@@ -133,6 +137,11 @@ These follow the spec's facilitator interface (§7 of the core spec), so any x40
 - `POST /api/facilitator/verify` and `POST /api/facilitator/settle` both take `{ "x402Version": 2, "paymentPayload": <PaymentPayload>, "paymentRequirements": <PaymentRequirements> }`.
 - `verify` is **read-only** and returns `{ "isValid": true, "payer": "agent_01J…" }` or `{ "isValid": false, "invalidReason": "challenge_expired", "invalidMessage": "…" }`.
 - `settle` consumes the receipt, writes the ledger entries and returns a `SettlementResponse` (as in §2). A seller calls it only after its handler succeeds (the `authorization` flow). If it never calls it, the reservation is released when the receipt expires, so nothing is charged.
+- Every `settle` answer is a `SettlementResponse`, failures included, so an x402 SDK can parse it. A receipt that is expired or already used gets `410 { "success": false, "errorReason": "challenge_expired", "errorMessage": "…", "transaction": "", "network": "paypal:sandbox" }`, and `verify` returns `isValid: false` with `invalidReason: "challenge_expired"`. Any other failure of `settle` returns 200 with `success: false` and `errorReason: "invalid_receipt"`.
+- A request body the facilitator can't use gets a 400 with x402's error codes: `invalid_payload` (not a JSON object, or no `paymentPayload`), `invalid_x402_version` (`x402Version` is not 2) or `invalid_payment_requirements` (`paymentRequirements` is not an object). The body is `{ "isValid": false, "invalidReason", "invalidMessage" }` from `verify` and a `SettlementResponse` with that `errorReason` from `settle`.
+- Both routes check that `paymentRequirements` and `paymentPayload.accepted` are exactly what the Challenge offered. The expected requirements are rebuilt from the current config (`RECEIPT_TTL_SECONDS`, `APP_BASE_URL`, `PAYPAL_ENV`), so changing one of these between pay and settle makes receipts already issued read as `invalid_receipt`.
+- **Neither route needs a key: the receipt is the credential.** It is single-use and bound to one Challenge's seller (`payTo`) and amount, and the gateway strips `PAYMENT-SIGNATURE` before forwarding, so a seller never sees a hosted Call's receipt. Today every Challenge comes from the hosted gateway, so whoever holds a receipt (in practice, only the buyer) can settle a hosted Endpoint's Call here without the upstream ever being called. That only lets the buyer charge themselves for nothing; it can't move anyone else's money.
+- **Settling here while the gateway is forwarding the same receipt:** the gateway's claim on the hold does not stop this route, so the settle here succeeds, the buyer is charged once, and the gateway's own settle then fails, answering `410 challenge_expired` and dropping the upstream response. If this route settles first, the gateway's claim fails and it answers `410` without calling upstream.
 
 ## 4. Errors
 
@@ -161,6 +170,14 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 The gateway never issues a $0 Challenge (a $0 endpoint is forwarded free, see §2), so `invalid_amount` from `/api/pay` only means bad data.
 
 `POST /api/pay` must see the challenge before the funds check, so a stale nonce gets 410 even with an empty wallet.
+
+An autopay gateway request (§2) returns the `/api/pay` errors above, plus these for `Idempotency-Key`:
+
+| Status | `code` | Meaning | Details |
+|---|---|---|---|
+| 400 | `invalid_request` | `Idempotency-Key` is empty or longer than 255 characters | — |
+| 409 | `idempotent_replay` | A request with this key was already paid; nothing was charged again | `callId`, `upstreamStatus` |
+| 409 | `idempotency_in_progress` | A request with this key is still being served | — |
 
 ## 5. MCP server
 

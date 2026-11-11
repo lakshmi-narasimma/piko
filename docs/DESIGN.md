@@ -284,7 +284,7 @@ budgets(id, org_id, scope_type[org|team|agent], scope_id, period[day|month|task]
 policies(id, org_id, source_text, compiled_json, confirmed_at, created_at)
 approvals(id, agent_id, org_id, policy_id?, challenge_nonce, amount_micro, status[pending|approved|denied], decided_by, decided_at, created_at)
 listings(id, seller_org_id, slug, name, description, base_url, kind[http|mcp|both], category?, rating?, embedding, created_at)
-endpoints(id, listing_id, method, path_or_tool, price_micro, free_quota, created_at)
+endpoints(id, listing_id, seller_org_id, method, path_or_tool, price_micro, free_quota, created_at)
 rate_overrides(id, endpoint_id, buyer_org_id, price_micro)
 challenges(nonce, endpoint_id, agent_id?, buyer_org_id?, amount_micro, expires_at, reserved_at, reservation_expires_at, consumed_at, created_at)
 calls(id, nonce?, agent_id, buyer_org_id, endpoint_id, amount_micro, status[paid|free|refunded|blocked], block_reason?, upstream_status, latency_ms, simulated bool, created_at)
@@ -304,6 +304,10 @@ Rules:
 - A Challenge's `agent_id` and `buyer_org_id` are null when the 402 goes to a caller who sent no key. `POST /api/pay` fills them in.
 - `orgs.slug` is the `<seller>` in `/g/<seller>/…` and `/mcp/<seller>`.
 - `teams.frozen_at` and `orgs.frozen_at` back the kill switch at those levels.
+- An Agent's team must be in the Agent's org: a composite foreign key `(team_id, org_id) → teams(id, org_id)` enforces it. An Agent with no team skips the check.
+- `budgets.scope_id` is an org, team or Agent id, according to `scope_type`, so it has no foreign key. Budget code must check that the scope belongs to the Budget's `org_id`.
+- A route is unique per seller, `(seller_org_id, method, path_or_tool)`, because the gateway URL `/g/<seller>/<path>` names no listing. `endpoints.seller_org_id` copies the listing's seller: a trigger fills it on insert, and a composite foreign key `(listing_id, seller_org_id) → listings(id, seller_org_id)` keeps the two equal.
+- `listings.rating` is between 0 and 5.
 
 ## 13. PayPal integration map
 

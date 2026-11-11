@@ -19,9 +19,6 @@ describe("parseEnv", () => {
     const env = parseEnv(valid);
     expect(env.PAYPAL_ENV).toBe("sandbox");
     expect(env.GEMINI_MODEL).toBe("gemini-3.6-flash");
-    expect(env.GEMINI_FALLBACK_MODELS).toEqual(["gemini-3-flash-preview", "gemini-3.5-flash-lite"]);
-    expect(env.GEMINI_EMBEDDING_MODEL).toBe("gemini-embedding-2");
-    expect(env.GEMINI_EMBEDDING_DIMENSIONS).toBe(768);
     expect(env.PLATFORM_FEE_BPS).toBe(500);
     expect(env.PAYOUT_THRESHOLD_MICRO).toBe(1_000_000n);
     expect(env.DEMO_MODE).toBe(false);
@@ -32,6 +29,49 @@ describe("parseEnv", () => {
     expect(env.PAYPAL_WEBHOOK_ID).toBe("");
     expect(env.GROQ_API_KEY).toBe("");
     expect(env.GEMINI_MODEL).toBe("gemini-3.6-flash");
+  });
+
+  it("defaults the AI chain to the models pinned in decision 0011", () => {
+    const env = parseEnv(valid);
+    expect(env.GEMINI_FALLBACK_MODELS).toEqual(["gemini-3-flash-preview", "gemini-3.5-flash-lite"]);
+    expect(env.GEMINI_EMBEDDING_MODEL).toBe("gemini-embedding-2");
+    expect(env.GEMINI_EMBEDDING_DIMENSIONS).toBe(768);
+    expect(env.GROQ_MODEL).toBe("openai/gpt-oss-120b");
+  });
+
+  it("reads the fallback models as a trimmed comma-separated list without repeats", () => {
+    const env = parseEnv({
+      ...valid,
+      GEMINI_FALLBACK_MODELS:
+        " gemini-3-flash-preview , ,gemini-3.5-flash-lite,gemini-3-flash-preview",
+      GEMINI_EMBEDDING_DIMENSIONS: "1536",
+    });
+    expect(env.GEMINI_FALLBACK_MODELS).toEqual(["gemini-3-flash-preview", "gemini-3.5-flash-lite"]);
+    expect(env.GEMINI_EMBEDDING_DIMENSIONS).toBe(1536);
+  });
+
+  it("rejects -latest aliases and impossible embedding sizes, naming the variable", () => {
+    let error: unknown;
+    try {
+      parseEnv({
+        ...valid,
+        GEMINI_MODEL: "gemini-flash-latest",
+        GEMINI_FALLBACK_MODELS: "gemini-3-flash-preview,gemini-flash-lite-latest",
+        GEMINI_EMBEDDING_DIMENSIONS: "4096",
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    const issues = (error as EnvError).issues;
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        "GEMINI_MODEL: must be a pinned model id, not a -latest alias",
+        "GEMINI_FALLBACK_MODELS: must be a pinned model id, not a -latest alias",
+      ]),
+    );
+    expect(issues.some((issue) => issue.startsWith("GEMINI_EMBEDDING_DIMENSIONS: "))).toBe(true);
+    expect(issues.join(" ")).not.toMatch(/flash-lite-latest|4096/);
   });
 
   it("fails fast on a missing or blank required variable, naming it without its value", () => {

@@ -13,7 +13,7 @@ async function LoginContent() {
   if (principal) redirect(AREA_PATH[principal.area]);
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-12">
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-center justify-center gap-6 px-4 py-12">
       <h1 className="text-3xl font-semibold tracking-tight">
         {getEnv().DEMO_MODE ? "Pick a persona" : "Sign in"}
       </h1>

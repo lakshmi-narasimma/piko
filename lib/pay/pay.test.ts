@@ -142,16 +142,85 @@ describe.skipIf(!url)("POST /api/pay", () => {
     expect(await errorOf(res)).toMatchObject({ code: "challenge_expired" });
   });
 
-  it("returns 410 when the same Challenge is paid twice, and holds the amount once", async () => {
+  it("gives the same agent the same Receipt when it retries, and holds the amount once", async () => {
     const buyer = await createBuyer(db, 10_000n);
     const { nonce } = await challenge();
 
-    expect((await pay(buyer.rawKey, { nonce })).status).toBe(200);
+    const first = await pay(buyer.rawKey, { nonce });
+    expect(first.status).toBe(200);
     const second = await pay(buyer.rawKey, { nonce });
+
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual(await first.json());
+    expect(await availableFunds(db, buyer.orgId)).toBe(8_000n);
+  });
+
+  it("returns 410 when another agent of the same org pays a held Challenge", async () => {
+    const buyer = await createBuyer(db, 10_000n);
+    const { nonce } = await challenge();
+    const [secondAgent] = await db
+      .insert(agents)
+      .values({ orgId: buyer.orgId, name: "second-agent" })
+      .returning({ id: agents.id });
+    const key = await createKey(db, secondAgent!.id);
+
+    expect((await pay(buyer.rawKey, { nonce })).status).toBe(200);
+    const second = await pay(key.rawKey, { nonce });
 
     expect(second.status).toBe(410);
     expect(await errorOf(second)).toMatchObject({ code: "challenge_expired" });
     expect(await availableFunds(db, buyer.orgId)).toBe(8_000n);
+  });
+
+  it("returns 403 when another buyer pays a Challenge someone else holds", async () => {
+    const buyer = await createBuyer(db, 10_000n);
+    const other = await createBuyer(db, 10_000n);
+    const { nonce } = await challenge();
+
+    expect((await pay(buyer.rawKey, { nonce })).status).toBe(200);
+    const res = await pay(other.rawKey, { nonce });
+
+    expect(res.status).toBe(403);
+    expect(await errorOf(res)).toMatchObject({ code: "challenge_buyer_mismatch" });
+    expect(await availableFunds(db, other.orgId)).toBe(10_000n);
+  });
+
+  it("checks the buyer under the lock too, when two buyers race for one Challenge", async () => {
+    const first = await createBuyer(db, 10_000n);
+    const second = await createBuyer(db, 10_000n);
+    const { nonce } = await challenge();
+
+    const results = await Promise.all([
+      pay(first.rawKey, { nonce }),
+      pay(second.rawKey, { nonce }),
+    ]);
+
+    expect(results.map((res) => res.status).sort()).toEqual([200, 403]);
+    const funds = [await availableFunds(db, first.orgId), await availableFunds(db, second.orgId)];
+    expect(funds.map(String).sort()).toEqual(["10000", "8000"]);
+  });
+
+  it("answers an unexpected failure with 500 internal_error and no details", async () => {
+    const buyer = await createBuyer(db, 10_000n);
+    const { nonce } = await challenge();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const broken = { ...config, receiptSigningSecret: undefined as unknown as string };
+
+    const res = await handlePayRequest(
+      { db, config: broken },
+      new Request("https://piko.test/api/pay", {
+        method: "POST",
+        headers: { authorization: `Bearer ${buyer.rawKey}` },
+        body: JSON.stringify({ nonce }),
+      }),
+    );
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: Record<string, unknown> };
+    expect(Object.keys(body.error).sort()).toEqual(["code", "message"]);
+    expect(body.error.code).toBe("internal_error");
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
   });
 
   it("returns 402 insufficient_funds for an empty wallet", async () => {

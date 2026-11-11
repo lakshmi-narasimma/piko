@@ -66,13 +66,20 @@ All three headers carry **base64-encoded JSON** (standard base64 of the UTF-8 JS
 }
 ```
 - `resource` is an object (`ResourceInfo`) at the top level, not a string inside `accepts[]`. `description` lives there.
-- `amount` (not v1's `maxAmountRequired`) is in the asset's atomic unit. For `paypal-ledger` that is **micro-USD** (`asset` is the ISO 4217 code `USD`, and `extra.decimals: 6` says so explicitly).
+- `amount` (not v1's `maxAmountRequired`) is in the asset's atomic unit. For `paypal-ledger` that is **micro-USD** (`asset` is the ISO 4217 code `USD`, and `extra.decimals: 6` says so explicitly), so `"2000"` is **$0.002**.
+  - **This deviates from the precedent.** The spec's `cloudflare:402` binding uses the same `asset: "USD"` with `amount` in cents, where `"2000"` would be $20.00. We use micro-USD because per-call prices are fractions of a cent. A client must read `extra.decimals` (or know `paypal-ledger`) before it shows or compares a price. See [decision 0011](decisions/0011-x402-v2-and-gemini-model.md).
 - `payTo` is the seller slug. `maxTimeoutSeconds` is required by the spec and equals `RECEIPT_TTL_SECONDS`.
 - Piko-specific fields go in `extra`, which the spec reserves for scheme-specific data: the challenge `nonce`, its `expiresAt`, the `facilitator` base URL and the `payUrl` that issues receipts. `extra.paymentFlow` is omitted, which means the default `authorization` flow (verify → resource → settle).
 
 The price shown is already the buyer org's **enterprise rate** if one exists.
 
-**Free allowance.** A free Call needs the agent's Key on the request, because the Key identifies the buyer. While the buyer org has made fewer free Calls to an endpoint than its quota, the gateway skips the 402, forwards the request and records a `free` Call of amount 0 with no Ledger entries. A free Call whose upstream fails (5xx or timeout) returns `502 upstream_failed` with `refunded: false`, charges nothing, and does not use up the quota.
+**Free allowance.** A free Call needs the agent's Key on the request, because the Key identifies the buyer. While the buyer org has made fewer free Calls to an endpoint than its quota, the gateway skips the 402, forwards the request and records a `free` Call of amount 0 with no Ledger entries. A free Call whose upstream fails (5xx or timeout) returns `502 upstream_failed` with `refunded: false`, charges nothing, and does not use up the quota. Seeded `simulated` Calls never count toward the quota.
+
+**$0 endpoints.** An endpoint priced at 0 never gets a 402, so a Challenge always has a positive amount. The gateway forwards every request like a free Call, with no quota. With a Key it records a `free` Call of amount 0 (no Ledger entries); with no Key it forwards without recording a Call, since there is no buyer to record it against. A failed upstream returns `502 upstream_failed` with `refunded: false`.
+
+**Upstream redirects.** The gateway does not follow upstream redirects, and it never passes the seller's base URL back. A `Location` or `Content-Location` under the listing's base URL is rewritten to the matching root-relative `/g/{seller}/...` path; one elsewhere on the upstream's origin is dropped; one on another origin passes through unchanged.
+
+**Challenge cleanup.** About one 402 in ten also deletes up to 100 Challenges that expired over 5 minutes ago and were never reserved (and that no Call or Approval references). Within those 5 minutes a late payment still gets `410 challenge_expired`; after that the nonce is unknown.
 
 **Gateway errors.** An unknown seller or route returns `404 not_found`. A Key that is sent but wrong returns `401 invalid_key`, and a frozen agent's Key returns `423 agent_frozen`; a request with no Key gets the 402. A Challenge issued with a Key can only be paid by that same buyer org.
 
@@ -89,6 +96,8 @@ The agent does not send the bare JWT. It sends an x402 `PaymentPayload` with the
 }
 ```
 `accepted` must equal one of the offered `accepts[]` entries, and the receipt's `nonce` and `amount` must match it.
+
+**Retrying `/api/pay`.** Paying is safe to retry. If the same agent pays the same nonce again while its hold is active and before the gateway (or facilitator) has started using it, `/api/pay` returns the same receipt with the same `expiresAt` and holds the amount only once. Another agent of the same org gets `410 challenge_expired`, and an agent of another org gets `403 challenge_buyer_mismatch`. Once a Call has started on the receipt, a retry gets `410`.
 
 ### Settlement (`SettlementResponse`, the `PAYMENT-RESPONSE` header)
 Before forwarding, the gateway **claims** the receipt's reservation in one atomic update. Only one request per receipt gets past the claim, across every server process; the others get `410 challenge_expired` and never reach the seller. The claim only matches the hold the receipt was issued for (its `exp` is that hold's expiry, to the second), so a receipt from an earlier hold on the same Challenge is rejected. The claim also extends the hold to cover reading the body, the upstream call and settling, so the seller never runs on a hold that has run out.
@@ -115,8 +124,8 @@ After the upstream response:
 | 4 | `GET /api/directory/search` | Agent | Semantic search over listings, with prices for the caller's org |
 | 5 | `GET /api/wallet` | Agent | Balance, budgets left, frozen state for this key |
 | 6 | `GET /api/facilitator/supported` | Anyone | Schemes and networks Piko settles |
-| 7 | `POST /api/facilitator/verify` | Anyone holding the PaymentPayload | Check a receipt without consuming it |
-| 8 | `POST /api/facilitator/settle` | Anyone holding the PaymentPayload | Consume a receipt and settle (for sellers not behind the hosted gateway) |
+| 7 | `POST /api/facilitator/verify` | Anyone holding the `PaymentPayload` | Check a receipt without consuming it |
+| 8 | `POST /api/facilitator/settle` | Anyone holding the `PaymentPayload` | Consume a receipt and settle (used by sellers not behind the hosted gateway) |
 
 ### Facilitator endpoints (x402 v2 shapes)
 These follow the spec's facilitator interface (§7 of the core spec), so any x402 v2 resource server can use Piko as its facilitator for `paypal-ledger`.
@@ -151,7 +160,10 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 |---|---|---|
 | 400 | `invalid_request` | The body is not JSON with a string `nonce` |
 | 404 | `not_found` | No Challenge has this nonce |
-| 403 | `challenge_buyer_mismatch` | The Challenge was issued with a Key from a different buyer org |
+| 403 | `challenge_buyer_mismatch` | The Challenge was issued with a Key from a different buyer org, or another org has already reserved it |
+| 500 | `internal_error` | Something unexpected failed. The cause is logged on the server, never returned |
+
+The gateway never issues a $0 Challenge (a $0 endpoint is forwarded free, see §2), so `invalid_amount` from `/api/pay` only means bad data.
 
 `POST /api/pay` must see the challenge before the funds check, so a stale nonce gets 410 even with an empty wallet.
 

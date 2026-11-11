@@ -55,7 +55,7 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** The client id and secret are in `.env.local`, and the checklist items for steps 1–6 are ticked.
   - **Depends on:** nothing
 
-- [ ] **P0-03 Get the other keys and the database** · `human` `infra` · S
+- [x] **P0-03 Get the other keys and the database** · `human` `infra` · S
   - **Goal:** Get the Gemini key, the Channel3 key, a Neon database with `CREATE EXTENSION vector`, and the generated secrets (PAYPAL_SETUP.md steps 7–9).
   - **Done when:** `.env.local` has every value from `.env.example` except the webhook id and the Render URL.
   - **Depends on:** nothing
@@ -65,7 +65,7 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** The answer is recorded in [DESIGN.md §19](DESIGN.md#19-open-items).
   - **Depends on:** nothing
 
-- [ ] **P0-05 Confirm the x402 v2 details and the Gemini limits** · `research` `docs` · S
+- [x] **P0-05 Confirm the x402 v2 details and the Gemini limits** · `research` `docs` · S
   - **Goal:** Read the x402-foundation `specs/` for v2 header names, payload shapes and the rules for a custom scheme. Confirm the current Gemini Flash model name, its free-tier limits, and the embedding model.
   - **Done when:** Any differences are fixed in API.md and openapi.yaml, and a decision record `0011` captures the findings.
   - **Depends on:** nothing
@@ -75,12 +75,12 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** `npm run dev` serves a placeholder page, every script runs, and the "Run it locally" section of README is filled in.
   - **Depends on:** P0-01
 
-- [ ] **P0-07 Choose the ORM and connect the database** · `infra` · S
+- [x] **P0-07 Choose the ORM and connect the database** · `infra` · S
   - **Goal:** Pick Drizzle or Prisma ([DESIGN.md §11](DESIGN.md#11-architecture) left it open). Wire up Neon, the migrations, and a separate test database (a Neon branch or local Postgres) that the tests reset.
   - **Done when:** A decision record explains the choice, `db:migrate` runs on an empty database, and one test can write and read a row.
   - **Depends on:** P0-06, P0-03
 
-- [ ] **P0-08 Add CI** · `infra` · S
+- [x] **P0-08 Add CI** · `infra` · S
   - **Goal:** A GitHub Action that runs lint, typecheck and tests (with a Postgres service) on every PR.
   - **Done when:** A PR shows a green check, and a failing test turns it red.
   - **Depends on:** P0-07
@@ -90,8 +90,8 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
 ## Phase 1: Payments core (ledger, x402 loop, sample APIs)
 Covers TEST_PLAN **F1** and **F2**.
 
-- [ ] **P1-01 Create the full data model** · `core` `infra` · M
-  - **Goal:** Write a migration for every table in [DESIGN.md §12](DESIGN.md#12-data-model-first-pass). Amounts are `bigint` micro-USD. Add `calls.simulated` and a `webhook_events` table for idempotency. Add the indexes that balances and calls need.
+- [x] **P1-01 Create the full data model** · `core` `infra` · M
+  - **Goal:** Write a migration for every table in [DESIGN.md §12](DESIGN.md#12-data-model). Amounts are `bigint` micro-USD. Add `calls.simulated` and a `webhook_events` table for idempotency. Add the indexes that balances and calls need.
   - **Done when:** The migration applies cleanly, and the schema matches §12. Any differences are written back into §12.
   - **Depends on:** P0-07
 
@@ -100,12 +100,12 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** Unit tests cover even and uneven splits, such as 3 micro-USD, and no float ever touches an amount.
   - **Depends on:** P0-06
 
-- [ ] **P1-03 Ledger: post a Call and refund it** · `core` · M
+- [x] **P1-03 Ledger: post a Call and refund it** · `core` · M
   - **Goal:** In `lib/ledger`, write a Call's three entries in one transaction, write a refund as three reversing entries, add `balanceOf(account)`, and add a reserve-funds step that can't overdraw under concurrency (a row lock or serializable transaction).
   - **Done when:** Every F1 test passes, including the random run of 1,000 operations and the test of two concurrent Calls that would overdraw.
   - **Depends on:** P1-01, P1-02
 
-- [ ] **P1-04 Agent keys** · `core` · S
+- [x] **P1-04 Agent keys** · `core` · S
   - **Goal:** Generate `pk_agent_…` keys and store only a hash plus a prefix. Look up an agent from a key, support the optional `X-Piko-Secret`, and return 401 `invalid_key` for a bad key.
   - **Done when:** Tests cover a valid key, a revoked key and an unknown key.
   - **Depends on:** P1-01
@@ -124,22 +124,22 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** Each one answers directly over HTTP, and Price History returns the same series for the same id every time.
   - **Depends on:** P1-05
 
-- [ ] **P1-07 Minimal seed** · `core` · S
+- [x] **P1-07 Minimal seed** · `core` · S
   - **Goal:** A repeatable `npm run seed` that creates Sam (agent and key), Priya Labs, DataCorp, the four listings and their endpoints, and Priya's $0.94 balance. The full demo world comes in P9-01.
   - **Done when:** Running the seed twice leaves the same state, and it prints Sam's key.
   - **Depends on:** P1-03, P1-04
 
-- [ ] **P1-08 Gateway: return a 402 challenge** · `core` · M
+- [x] **P1-08 Gateway: return a 402 challenge** · `core` · M
   - **Goal:** Add the route `/g/[seller]/[...path]`. It matches an endpoint, stores a Challenge (nonce, amount, `CHALLENGE_TTL_SECONDS`), and returns 402 with the challenge body and a base64 `PAYMENT-REQUIRED` header ([API.md](API.md)). It also applies the free allowance: the first N calls from a buyer skip the 402.
   - **Done when:** The F2 items for the challenge, its header and the free allowance pass.
   - **Depends on:** P1-07
 
-- [ ] **P1-09 `POST /api/pay` pipeline** · `core` · M
+- [x] **P1-09 `POST /api/pay` pipeline** · `core` · M
   - **Goal:** Check the key, then funds (§9 steps 1, 5 and 6), then issue the signed single-use Receipt JWT (`RECEIPT_TTL_SECONDS`) and reserve the amount. Build it as an ordered pipeline so Phase 5 can add the breaker, policy and budget steps. Return 410 `challenge_expired` and 402 `insufficient_funds`.
   - **Done when:** Tests cover a good payment, an expired challenge, a used challenge and an empty wallet.
   - **Depends on:** P1-08
 
-- [ ] **P1-10 Gateway: verify, forward and settle** · `core` · M
+- [x] **P1-10 Gateway: verify, forward and settle** · `core` · M
   - **Goal:** Read `PAYMENT-SIGNATURE`, verify the receipt (signature, binding, expiry, single use), forward the request upstream with a timeout of `UPSTREAM_TIMEOUT_MS`, write the `calls` row and the ledger entries, and return the `PAYMENT-RESPONSE` header.
   - **Done when:** The F2 items for a paid retry, a reused receipt and a tampered receipt pass.
   - **Depends on:** P1-09, P1-06
@@ -154,7 +154,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** The F2 autopay item passes, and the buyer is charged exactly once.
   - **Depends on:** P1-10
 
-- [ ] **P1-13 Demo agent script** · `core` · S
+- [x] **P1-13 Demo agent script** · `core` · S
   - **Goal:** `scripts/agent.ts` runs the three-step loop against a running app with Sam's key and prints each step. It doubles as a test and as an example for the README.
   - **Done when:** It completes a paid call to Price History locally, and Sam's balance drops by $0.002.
   - **Depends on:** P1-10
@@ -370,7 +370,7 @@ Covers TEST_PLAN **F8**.
 Covers TEST_PLAN **F3**, **F11**, and the rest of **F2** and **F10**.
 
 - [ ] **P8-01 Automatic refunds** · `core` · M
-  - **Goal:** An upstream 5xx or timeout writes three reversing entries, marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
+  - **Goal:** An upstream 5xx or timeout releases the Call's reservation without posting any ledger entries (in the `authorization` flow nothing is posted before the upstream answers), marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
   - **Done when:** Every F3 item passes.
   - **Depends on:** P1-10
 

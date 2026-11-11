@@ -33,6 +33,10 @@ paths:
       description: |
         Without PAYMENT-SIGNATURE (and without X-Piko-Autopay) returns 402 with a challenge.
         With a valid receipt, proxies to the seller and returns the upstream response.
+        A free Call (agent key, within the endpoint's free quota) and any call to an
+        endpoint priced at 0 are proxied without a challenge. An upstream Location or
+        Content-Location under the seller's base URL is rewritten to /g/{seller}/...,
+        and one elsewhere on the upstream's origin is dropped.
         Other HTTP methods behave the same way.
       security:
         - {}

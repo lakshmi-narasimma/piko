@@ -92,11 +92,11 @@ Done once the app runs locally.
 ---
 
 ## Checklist
-- [ ] 6 sandbox accounts created; logins saved privately
-- [ ] REST app created; Payouts and Invoicing enabled
-- [ ] Webhook registered; `PAYPAL_WEBHOOK_ID` saved
-- [ ] Gemini key and model name saved
-- [ ] Channel3 key saved
-- [ ] Neon database created; `vector` extension enabled (or noted as failed)
-- [ ] Two secrets generated
+- [x] 6 sandbox accounts created; logins saved privately
+- [x] REST app created; Payouts and Invoicing enabled
+- [ ] Webhook registered; `PAYPAL_WEBHOOK_ID` saved *(later: backlog task P2-05, once the app runs)*
+- [x] Gemini key and model name saved
+- [x] Channel3 key saved
+- [x] Neon database created; `vector` extension enabled (or noted as failed)
+- [x] Two secrets generated
 - [ ] Discord question asked

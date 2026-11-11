@@ -4,7 +4,7 @@ import type { Db } from "../db/client";
 import { ledgerEntries } from "../db/schema";
 import { getEnv } from "../env";
 import { isDuplicateEvent, LedgerError } from "./errors";
-import { splitPrice } from "./fee";
+import { splitPrice } from "../money";
 
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 /** A database client or an open transaction, so callers can compose these functions. */

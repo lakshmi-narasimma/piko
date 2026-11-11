@@ -1,0 +1,17 @@
+# Normalize text files to LF in the repo and in working trees, on every OS.
+* text=auto eol=lf
+
+# Binary files: never touch line endings or diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.avif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary

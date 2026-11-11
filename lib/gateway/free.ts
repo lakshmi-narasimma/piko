@@ -31,6 +31,8 @@ export function claimFreeCall(
           eq(calls.buyerOrgId, buyer.orgId),
           eq(calls.endpointId, route.endpointId),
           eq(calls.status, "free"),
+          // Seeded traffic is not the buyer's: it must not use up their real allowance.
+          eq(calls.simulated, false),
         ),
       );
     if (used!.total >= route.freeQuota) return null;
@@ -47,6 +49,28 @@ export function claimFreeCall(
       .returning({ id: calls.id });
     return call!.id;
   });
+}
+
+/**
+ * Records a Call to an Endpoint priced at $0. There is no quota to guard, so no lock: the
+ * row is only the record of the Call. Like a free Call it writes no Ledger entries.
+ */
+export async function recordZeroPriceCall(
+  db: Db,
+  route: GatewayRoute,
+  buyer: FreeCallBuyer,
+): Promise<string> {
+  const [call] = await db
+    .insert(calls)
+    .values({
+      agentId: buyer.agentId,
+      buyerOrgId: buyer.orgId,
+      endpointId: route.endpointId,
+      amountMicro: 0n,
+      status: "free",
+    })
+    .returning({ id: calls.id });
+  return call!.id;
 }
 
 /** Records how a claimed free Call ended. */

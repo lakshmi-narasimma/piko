@@ -92,6 +92,10 @@ npm test            # Vitest
 npm run build       # production build
 ```
 
+## Deploy (Render)
+- Set every variable from `.env.example` in Render's environment settings. The server checks them at boot and exits non-zero if one is missing or invalid, so a bad deploy fails instead of going live.
+- `NEXT_PUBLIC_PAYPAL_CLIENT_ID` is inlined into the browser bundle by `next build`, so it must be set before the build runs, not only at runtime. Changing it needs a rebuild.
+
 ## Honesty notes
 - All payments use the **PayPal sandbox**: no real money.
 - Dashboard history and background traffic are **simulated** and labelled as such in the app. Every flow that moves money (top-ups, payouts, invoices, checkout) is real sandbox activity.

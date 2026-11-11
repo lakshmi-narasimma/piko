@@ -11,6 +11,9 @@ import { z } from "zod";
 
 const required = z.string().min(1);
 const positiveInt = z.coerce.number().int().positive();
+const modelId = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9.-]*$/i, "must be a comma-separated list of model ids");
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -36,7 +39,20 @@ const envSchema = z.object({
 
   // AI
   GEMINI_API_KEY: required,
-  GEMINI_MODEL: z.string().default("gemini-flash-latest"),
+  // Model ids per docs/decisions/0011. Fallbacks are tried in order after a 503 or 429.
+  GEMINI_MODEL: z.string().default("gemini-3.6-flash"),
+  GEMINI_FALLBACK_MODELS: z
+    .string()
+    .default("gemini-3-flash-preview,gemini-3.5-flash-lite")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((model) => model.trim())
+        .filter((model) => model !== ""),
+    )
+    .pipe(z.array(modelId)),
+  GEMINI_EMBEDDING_MODEL: z.string().default("gemini-embedding-2"),
+  GEMINI_EMBEDDING_DIMENSIONS: positiveInt.default(768),
   // Optional fallback provider.
   GROQ_API_KEY: z.string().default(""),
 
@@ -78,7 +94,8 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   if (!result.success) {
     throw new EnvError(
       result.error.issues.map((issue) => {
-        const name = issue.path.join(".");
+        // Report the variable itself, not an index inside a parsed list.
+        const name = String(issue.path[0]);
         return name in present ? `${name}: ${issue.message}` : `${name}: missing`;
       }),
     );

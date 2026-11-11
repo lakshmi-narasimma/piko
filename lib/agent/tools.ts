@@ -25,8 +25,12 @@ export interface AgentToolContext {
   key: string;
   baseUrl: string;
   taskBudgetMicro: bigint;
-  /** Running total of what this task has paid. The tools update it. */
-  state: { spentMicro: bigint };
+  /**
+   * What this task has paid, and what calls still in flight have set aside. The tools update
+   * both. A call reserves its price before it awaits anything, so parallel tool calls from one
+   * model step can't all pass the budget check on the same remaining amount.
+   */
+  state: { spentMicro: bigint; reservedMicro: bigint };
   search(query: string, limit: number): ReturnType<typeof searchDirectory>;
   /** The list price of an endpoint, or null if there is no such endpoint. */
   lookupPrice(seller: string, method: string, path: string): Promise<bigint | null>;
@@ -49,7 +53,7 @@ export function createToolContext(input: {
     key,
     baseUrl,
     taskBudgetMicro,
-    state: { spentMicro: 0n },
+    state: { spentMicro: 0n, reservedMicro: 0n },
     search: (query, limit) => searchDirectory(db, llm, { query, buyerOrgId: orgId, limit }),
     lookupPrice: async (seller, method, path) =>
       (await findRoute(db, seller, method, path))?.priceMicro ?? null,
@@ -61,8 +65,13 @@ export function createToolContext(input: {
 
 const usd = (micro: bigint) => formatUsd(micro);
 
+/** Spent plus reserved: what the task has committed, settled or not. */
+function committed(ctx: AgentToolContext): bigint {
+  return ctx.state.spentMicro + ctx.state.reservedMicro;
+}
+
 function remaining(ctx: AgentToolContext): bigint {
-  const left = ctx.taskBudgetMicro - ctx.state.spentMicro;
+  const left = ctx.taskBudgetMicro - committed(ctx);
   return left > 0n ? left : 0n;
 }
 
@@ -128,6 +137,7 @@ export function createAgentTools(ctx: AgentToolContext) {
         if (price === null) {
           return fail("no_such_endpoint", `No ${method} ${path} on ${seller}.`);
         }
+        // Check and reserve with no await in between, so parallel calls see each other.
         const left = remaining(ctx);
         if (price > left) {
           return fail(
@@ -135,6 +145,7 @@ export function createAgentTools(ctx: AgentToolContext) {
             `This costs ${usd(price)} but only ${usd(left)} of the task budget is left. Nothing was charged.`,
           );
         }
+        ctx.state.reservedMicro += price;
 
         const url = new URL(`/g/${seller}${path}`, ctx.baseUrl);
         for (const [name, value] of Object.entries(query ?? {})) url.searchParams.set(name, value);
@@ -142,18 +153,24 @@ export function createAgentTools(ctx: AgentToolContext) {
           Authorization: `Bearer ${ctx.key}`,
           [AUTOPAY_HEADER]: "true",
         };
-        if (body !== undefined) headers["Content-Type"] = "application/json";
-        const response = await ctx.send(
-          new Request(url, {
-            method,
-            headers,
-            body: body === undefined ? undefined : JSON.stringify(body),
-          }),
-          { seller, path: path.split("/").filter(Boolean) },
-        );
+        // A GET can't carry a body (new Request would throw), so a model-supplied one is dropped.
+        const sendBody = method === "GET" || body === undefined ? undefined : JSON.stringify(body);
+        if (sendBody !== undefined) headers["Content-Type"] = "application/json";
 
-        const paid = settledAmount(response);
-        ctx.state.spentMicro += paid;
+        let paid = 0n;
+        let response: Response;
+        try {
+          response = await ctx.send(new Request(url, { method, headers, body: sendBody }), {
+            seller,
+            path: path.split("/").filter(Boolean),
+          });
+          paid = settledAmount(response);
+        } finally {
+          // One synchronous block: the reservation becomes what was actually paid (0 on a throw).
+          ctx.state.reservedMicro -= price;
+          ctx.state.spentMicro += paid;
+        }
+
         const text = (await response.text()).slice(0, MAX_BODY_CHARS);
         if (!response.ok) {
           const code = errorCode(text) ?? `http_${response.status}`;
@@ -168,10 +185,11 @@ export function createAgentTools(ctx: AgentToolContext) {
       inputSchema: z.object({}),
       execute: async () => ({
         taskBudgetMicro: ctx.taskBudgetMicro.toString(),
-        spentMicro: ctx.state.spentMicro.toString(),
+        // Spent includes calls still in flight, so this never shows more left than there is.
+        spentMicro: committed(ctx).toString(),
         remainingMicro: remaining(ctx).toString(),
         remaining: usd(remaining(ctx)),
-        spent: usd(ctx.state.spentMicro),
+        spent: usd(committed(ctx)),
         walletBalance: usd(await ctx.walletBalance()),
         costMicro: "0",
         cost: usd(0n),

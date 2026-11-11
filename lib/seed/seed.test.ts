@@ -174,6 +174,12 @@ describe.skipIf(!url)("seed", () => {
     expect((await authenticateKey(db, second.samKey)).ok).toBe(true);
   });
 
+  it("can start Sam's wallet funded, for running paid Calls before top-ups exist", async () => {
+    await seed(db, { appBaseUrl, samWalletMicro: 5_000_000n });
+    const [sam] = await db.select().from(orgs).where(eq(orgs.slug, "sam"));
+    expect(await balanceOf(db, { type: "wallet", orgId: sam!.id })).toBe(5_000_000n);
+  });
+
   it("clears rows the Ledger's trigger would refuse to delete", async () => {
     await seed(db, { appBaseUrl });
     const [sam] = await db.select().from(orgs).where(eq(orgs.slug, "sam"));

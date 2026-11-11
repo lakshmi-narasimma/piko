@@ -18,7 +18,7 @@ The emails are Piko logins, separate from the PayPal sandbox emails. The persona
 ## 2. Buyers
 
 ### Sam (solo dev, prepaid)
-- Wallet balance: **$0.00**. The demo starts with a real PayPal top-up of $5.
+- Wallet balance: **$0.00**. The demo starts with a real PayPal top-up of $5. For local runs before PayPal top-ups exist, `npm run seed -- --sam-wallet-micro=<micro-USD>` starts the wallet funded through a `seed` Ledger entry.
 - Agent: `shopping-assistant`, with one key. Budget: **$1.00 per task**. "Notify above" threshold: **$0.05 per call**.
 
 ### Acme Corp (organisation, invoiced)

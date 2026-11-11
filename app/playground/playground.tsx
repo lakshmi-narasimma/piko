@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CallFeed } from "@/components/call-feed";
 import { formatUsd } from "@/lib/money";
 
@@ -115,6 +115,9 @@ export function Playground() {
   const [asked, setAsked] = useState("");
   const abort = useRef<AbortController | null>(null);
 
+  // Leaving the page mid-run closes the stream instead of leaving it open in the background.
+  useEffect(() => () => abort.current?.abort(), []);
+
   async function start() {
     const text = prompt.trim();
     if (!text || run.status === "running") return;
@@ -147,7 +150,15 @@ export function Playground() {
         buffer = frames.pop() ?? "";
         for (const frame of frames) {
           const line = frame.split("\n").find((l) => l.startsWith("data: "));
-          if (line) setRun((current) => apply(current, JSON.parse(line.slice(6)) as ServerEvent));
+          if (!line) continue;
+          // Parse outside the updater, so a bad frame is skipped rather than thrown during render.
+          let event: ServerEvent;
+          try {
+            event = JSON.parse(line.slice(6)) as ServerEvent;
+          } catch {
+            continue;
+          }
+          setRun((current) => apply(current, event));
         }
       }
       setRun((current) =>

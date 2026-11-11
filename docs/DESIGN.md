@@ -93,7 +93,7 @@ Not claimed as unique: no-code paywalls for MCP tools, and refunds when a call f
 - **AI pricing help:** the seller pastes docs or an OpenAPI spec. Gemini suggests per-endpoint prices and writes the directory listing.
 - **Enterprise rates:** a per-buyer-org price override table ("Acme pays $0.003, everyone else $0.005").
 - **Analytics:** calls, revenue per endpoint, top calling agents and orgs, and how many 402 responses turn into paid calls.
-- **Automatic refunds:** if the seller's upstream returns 5xx or times out, the buyer's charge is reversed on the ledger.
+- **Automatic refunds:** if the seller's upstream returns 5xx or times out, the buyer isn't charged: the reservation is released and nothing is posted to the ledger.
 - **Payouts:** automatic once the balance reaches **$1.00**, plus a manual "Withdraw" button, through PayPal Payouts.
 
 ### 5.3 Directory
@@ -173,7 +173,7 @@ Sum of org's call debits for the period → Invoicing v2 create + send (line ite
 Orgs have a **credit limit**. If the invoice is unpaid past the limit, the org's keys are paused.
 
 ### 7.5 Refund on failure
-Upstream 5xx or timeout (default 10 s) → reverse that call's three ledger entries → the agent receives a 502 with `refunded: true`.
+Upstream 5xx or timeout (default 10 s) → release the reservation (in the `authorization` flow nothing is posted before the upstream answers, so there are no entries to reverse) → mark the Call refunded → the agent receives a 502 with `refunded: true`. Three reversing entries are only for refunding a Call that was already settled.
 
 ## 8. x402-style protocol
 
@@ -196,12 +196,12 @@ Piko follows x402's shape (HTTP 402 → pay → retry with proof) and acts as th
     }]
   }
   ```
-  `amount` is in micro-USD (`extra.decimals: 6`). Piko's own fields live in `extra`, which x402 reserves for scheme-specific data.
+  `amount` is in micro-USD (`extra.decimals: 6`), so `"2000"` is $0.002. This deviates from the spec's `cloudflare:402` precedent, which puts USD `amount` in cents. Piko's own fields live in `extra`, which x402 reserves for scheme-specific data.
 - **Facilitator endpoints:** `GET /api/facilitator/supported`, `POST /api/facilitator/verify`, `POST /api/facilitator/settle`, with the x402 v2 request and response shapes (API.md §3). The hosted gateway calls these internally, and an external seller could call them too.
-- **Receipt:** a JWT signed with a server key containing `{nonce, buyerAgent, seller, endpoint, amount, exp}`. It's **single-use** (the nonce is stored and consumed on settle) and expires in 60 s. The agent sends it wrapped in an x402 `PaymentPayload` (`payload: { receipt }`).
+- **Receipt:** a JWT signed with a server key containing `{nonce, agentId, orgId, sellerId, endpointId, amount, exp}` (the same claims as API.md §2). It's **single-use** (the nonce is stored and consumed on settle) and expires after `RECEIPT_TTL_SECONDS` (default 60 s). The agent sends it wrapped in an x402 `PaymentPayload` (`payload: { receipt }`).
 - **Headers:** confirmed against the x402 v2 HTTP transport spec: `PAYMENT-REQUIRED` (402 → agent), `PAYMENT-SIGNATURE` (agent → gateway), `PAYMENT-RESPONSE` (gateway → agent, a `SettlementResponse` whose `transaction` is the Call id). All three are base64-encoded JSON.
 - **Flow:** x402's default `authorization` flow (verify → call upstream → settle), which matches "refund on upstream failure".
-- **Registration:** none is needed. x402 has no scheme or network registry; any string works, and clients skip `accepts[]` entries they don't understand. Getting `paypal-ledger` into the official repo is optional: open an issue, then a PR with `specs/schemes/paypal-ledger/scheme_paypal_ledger.md` from the template. Details in [decision 0011](decisions/0011-x402-v2-and-gemini-model.md).
+- **Registration:** none is needed. x402 has no scheme or network registry; any string works. The core spec doesn't say what a client does with an `accepts[]` entry it can't pay (it only says a client SHOULD skip an unknown `extra.paymentFlow`), so a client without `paypal-ledger` support simply can't pay this one. Getting `paypal-ledger` into the official repo is optional: open an issue, then a PR with `specs/schemes/paypal-ledger/scheme_paypal_ledger.md` from the template. Details in [decision 0011](decisions/0011-x402-v2-and-gemini-model.md).
 
 ## 9. Policy engine, budgets and circuit breaker
 
@@ -233,7 +233,17 @@ The admin sees the compiled rule and must click **Confirm** before it takes effe
 | **Directory embeddings** | Directory | Semantic search over listings | — |
 | *(stretch)* Spend analyst | Org console | "Why did costs spike?" chat over spend data | Read-only |
 
-**Model:** `gemini-3.6-flash` (stable, free tier) for text, tool calling and structured output. When it returns 503 or 429, `lib/llm` tries `gemini-3-flash-preview`, then `gemini-3.5-flash-lite`, then Groq. Free-tier quotas are per project **and per model**, so this chain also widens the daily allowance. Embeddings use `gemini-embedding-2` at 768 dimensions. The model ids come from env (`GEMINI_MODEL`, `GEMINI_FALLBACK_MODELS`, `GEMINI_EMBEDDING_MODEL`). Pinned ids are used rather than `-latest` aliases, because `gemini-flash-latest` returned 503 on every try on 2026-11-05. All of this goes through the Vercel AI SDK (`@ai-sdk/google`). See [decision 0011](decisions/0011-x402-v2-and-gemini-model.md) for limits and sources.
+**Model:** `gemini-3.6-flash` (stable, free tier) for text, tool calling and structured output. When it is busy, `lib/llm` tries `gemini-3-flash-preview`, then `gemini-3.5-flash-lite`, then Groq (`openai/gpt-oss-120b`, only if `GROQ_API_KEY` is set). Free-tier quotas are per project **and per model**, so this chain also widens the daily allowance. Embeddings use `gemini-embedding-2` at 768 dimensions. The model ids come from env (`GEMINI_MODEL`, `GEMINI_FALLBACK_MODELS`, `GEMINI_EMBEDDING_MODEL`, `GROQ_MODEL`). Pinned ids are used rather than `-latest` aliases, because `gemini-flash-latest` returned 503 on every try on 2026-11-05; env validation rejects `-latest` ids. All of this goes through the Vercel AI SDK (`ai`, `@ai-sdk/google`, `@ai-sdk/groq`). See [decision 0011](decisions/0011-x402-v2-and-gemini-model.md) for limits and sources.
+
+**How `lib/llm` falls back:**
+- **Busy means** 429, 503, Groq's 498, 500/502/504, 408, 404 (a retired or unknown model id), no HTTP response at all, or no answer within 20 s (for a stream, no response start within 20 s). Google treats 408 and 5xx as transient and suggests switching model on 500, and 0011 saw a retired model return 404, so another model can help in each case.
+- **Not busy:** 400, 401, 403, 422, a reply that fails the zod schema, and an abort by the caller. These are rethrown unchanged, because the next model would fail the same way.
+- **The SDK's own retries are off** (`maxRetries: 0`). Otherwise each model would be retried twice with 2 s and 4 s backoffs before the chain moves on, and a judge would wait for it.
+- **Tool loops are sticky:** once a model answers a step, the later steps of that call start from it.
+- **Streams** fall back only until the response starts. A provider error after that reaches the caller as an `error` part.
+- **When the chain is exhausted,** it throws `AiBusy` (`name: "AiBusy"`, `code: "ai_busy"`, a message safe to show, and `modelsTried`). It carries no prompt, key or provider error text. The UI shows the "AI busy" fallback (TEST_PLAN F9).
+- **Embeddings have no fallback.** Groq has no embeddings, and another model or size would put vectors in a different space. A busy embedding model throws `AiBusy` straight away, and a vector of the wrong size is rejected.
+- **Logs** name the model that answered and why each skipped model was skipped. They never include prompts or keys.
 
 ## 11. Architecture
 
@@ -284,7 +294,7 @@ budgets(id, org_id, scope_type[org|team|agent], scope_id, period[day|month|task]
 policies(id, org_id, source_text, compiled_json, confirmed_at, created_at)
 approvals(id, agent_id, org_id, policy_id?, challenge_nonce, amount_micro, status[pending|approved|denied], decided_by, decided_at, created_at)
 listings(id, seller_org_id, slug, name, description, base_url, kind[http|mcp|both], category?, rating?, embedding, created_at)
-endpoints(id, listing_id, method, path_or_tool, price_micro, free_quota, created_at)
+endpoints(id, listing_id, seller_org_id, method, path_or_tool, price_micro, free_quota, created_at)
 rate_overrides(id, endpoint_id, buyer_org_id, price_micro)
 challenges(nonce, endpoint_id, agent_id?, buyer_org_id?, amount_micro, expires_at, reserved_at, reservation_expires_at, consumed_at, created_at)
 calls(id, nonce?, agent_id, buyer_org_id, endpoint_id, amount_micro, status[paid|free|refunded|blocked], block_reason?, upstream_status, latency_ms, simulated bool, created_at)
@@ -300,10 +310,14 @@ Rules:
 - A unique index on `(reason, ref_id, account_type)` means the same event can't post twice to one account.
 - `ledger_entries.org_id` is null only for the platform account.
 - Every PayPal webhook handler is **idempotent**, keyed on the PayPal resource id. `webhook_events` is unique on the event id and on `(event_type, resource_id)`.
-- A **reservation** lives on the Challenge. It holds funds while `reserved_at` is set, `consumed_at` is null and `reservation_expires_at` is in the future. It needs no ledger entry, because entries are written on settle.
+- A **reservation** lives on the Challenge. It holds funds while `reserved_at` is set, `consumed_at` is null and `reservation_expires_at` is in the future. It needs no ledger entry, because entries are written on settle. Reserving and settling lock the buyer's org row and must run at READ COMMITTED (the Postgres default); inside a REPEATABLE READ or SERIALIZABLE transaction they throw `unsupported_isolation`, because an older snapshot could hide a concurrent reservation and overdraw the wallet.
 - A Challenge's `agent_id` and `buyer_org_id` are null when the 402 goes to a caller who sent no key. `POST /api/pay` fills them in.
 - `orgs.slug` is the `<seller>` in `/g/<seller>/…` and `/mcp/<seller>`.
 - `teams.frozen_at` and `orgs.frozen_at` back the kill switch at those levels.
+- An Agent's team must be in the Agent's org: a composite foreign key `(team_id, org_id) → teams(id, org_id)` enforces it. An Agent with no team skips the check.
+- `budgets.scope_id` is an org, team or Agent id, according to `scope_type`, so it has no foreign key. Budget code must check that the scope belongs to the Budget's `org_id`.
+- A route is unique per seller, `(seller_org_id, method, path_or_tool)`, because the gateway URL `/g/<seller>/<path>` names no listing. `endpoints.seller_org_id` copies the listing's seller: a trigger fills it on insert, and a composite foreign key `(listing_id, seller_org_id) → listings(id, seller_org_id)` keeps the two equal.
+- `listings.rating` is between 0 and 5.
 
 ## 13. PayPal integration map
 

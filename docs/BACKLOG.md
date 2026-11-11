@@ -50,13 +50,13 @@ One per phase: `P0 Setup`, `P1 Payments core`, … `P9 Ship`.
   - **Done when:** The repo exists, `main` holds every doc, and the labels and milestones exist. *(It goes public with an MIT licence in P9-11.)*
   - **Depends on:** nothing
 
-- [ ] **P0-02 Set up the PayPal sandbox** · `human` `paypal` · M
-  - **Goal:** Complete steps 1–6 of [PAYPAL_SETUP.md](PAYPAL_SETUP.md): the six sandbox accounts and the `piko` REST app with Payouts and Invoicing turned on.
-  - **Done when:** The client id and secret are in `.env.local`, and the checklist items for steps 1–6 are ticked.
+- [x] **P0-02 Set up the PayPal sandbox** · `human` `paypal` · M
+  - **Goal:** Complete steps 1–3 of [PAYPAL_SETUP.md](PAYPAL_SETUP.md): the six sandbox accounts and the `piko` REST app with Payouts and Invoicing turned on. The tunnel and webhook (steps 4–5) moved to P2-05, because they need the running app.
+  - **Done when:** The client id and secret are in `.env.local`, and the checklist items for the accounts and the REST app are ticked.
   - **Depends on:** nothing
 
-- [ ] **P0-03 Get the other keys and the database** · `human` `infra` · S
-  - **Goal:** Get the Gemini key, the Channel3 key, a Neon database with `CREATE EXTENSION vector`, and the generated secrets (PAYPAL_SETUP.md steps 7–9).
+- [x] **P0-03 Get the other keys and the database** · `human` `infra` · S
+  - **Goal:** Get the Gemini key, the Channel3 key, a Neon database with `CREATE EXTENSION vector`, and the generated secrets (PAYPAL_SETUP.md steps 6–9).
   - **Done when:** `.env.local` has every value from `.env.example` except the webhook id and the Render URL.
   - **Depends on:** nothing
 
@@ -95,7 +95,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** The migration applies cleanly, and the schema matches §12. Any differences are written back into §12.
   - **Depends on:** P0-07
 
-- [ ] **P1-02 Money helpers** · `core` · S
+- [x] **P1-02 Money helpers** · `core` · S
   - **Goal:** Add a `MicroUsd` type, dollar parsing and formatting (display only), and the fee split from `PLATFORM_FEE_BPS`. The seller's share rounds down, and the remainder goes to the platform.
   - **Done when:** Unit tests cover even and uneven splits, such as 3 micro-USD, and no float ever touches an amount.
   - **Depends on:** P0-06
@@ -110,12 +110,12 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** Tests cover a valid key, a revoked key and an unknown key.
   - **Depends on:** P1-01
 
-- [ ] **P1-05 `lib/llm` (Gemini with a Groq fallback)** · `ai` · S
+- [x] **P1-05 `lib/llm` (Gemini with a Groq fallback)** · `ai` · S
   - **Goal:** One module that every AI feature uses: text, structured output and embeddings through the Vercel AI SDK. It switches to Groq on rate limits, and throws a typed `AiBusy` error that the UI can show.
   - **Done when:** A smoke test calls Gemini, and a forced failure falls back to Groq or throws `AiBusy`.
   - **Depends on:** P0-06, P0-05
 
-- [ ] **P1-06 Sample seller APIs** · `core` `ai` · M
+- [x] **P1-06 Sample seller APIs** · `core` `ai` · M
   - **Goal:** Build the four APIs from [SEED_DATA.md §3](SEED_DATA.md#3-sellers-and-listings) under `/api/demo/sellers/*`:
     - Product Search: Channel3, falling back to a fixed product
     - Review Summariser: Gemini
@@ -129,32 +129,32 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** Running the seed twice leaves the same state, and it prints Sam's key.
   - **Depends on:** P1-03, P1-04
 
-- [ ] **P1-08 Gateway: return a 402 challenge** · `core` · M
+- [x] **P1-08 Gateway: return a 402 challenge** · `core` · M
   - **Goal:** Add the route `/g/[seller]/[...path]`. It matches an endpoint, stores a Challenge (nonce, amount, `CHALLENGE_TTL_SECONDS`), and returns 402 with the challenge body and a base64 `PAYMENT-REQUIRED` header ([API.md](API.md)). It also applies the free allowance: the first N calls from a buyer skip the 402.
   - **Done when:** The F2 items for the challenge, its header and the free allowance pass.
   - **Depends on:** P1-07
 
-- [ ] **P1-09 `POST /api/pay` pipeline** · `core` · M
+- [x] **P1-09 `POST /api/pay` pipeline** · `core` · M
   - **Goal:** Check the key, then funds (§9 steps 1, 5 and 6), then issue the signed single-use Receipt JWT (`RECEIPT_TTL_SECONDS`) and reserve the amount. Build it as an ordered pipeline so Phase 5 can add the breaker, policy and budget steps. Return 410 `challenge_expired` and 402 `insufficient_funds`.
   - **Done when:** Tests cover a good payment, an expired challenge, a used challenge and an empty wallet.
   - **Depends on:** P1-08
 
-- [ ] **P1-10 Gateway: verify, forward and settle** · `core` · M
+- [x] **P1-10 Gateway: verify, forward and settle** · `core` · M
   - **Goal:** Read `PAYMENT-SIGNATURE`, verify the receipt (signature, binding, expiry, single use), forward the request upstream with a timeout of `UPSTREAM_TIMEOUT_MS`, write the `calls` row and the ledger entries, and return the `PAYMENT-RESPONSE` header.
   - **Done when:** The F2 items for a paid retry, a reused receipt and a tampered receipt pass.
   - **Depends on:** P1-09, P1-06
 
-- [ ] **P1-11 Facilitator endpoints** · `core` · S
+- [x] **P1-11 Facilitator endpoints** · `core` · S
   - **Goal:** Add `GET /api/facilitator/supported`, `POST /verify` and `POST /settle`, sharing the gateway's own verify and settle code.
   - **Done when:** The facilitator routes in openapi.yaml match the responses, and a test settles a Call through them.
   - **Depends on:** P1-10
 
-- [ ] **P1-12 `X-Piko-Autopay` shortcut** · `core` · S
+- [x] **P1-12 `X-Piko-Autopay` shortcut** · `core` · S
   - **Goal:** With a key and `X-Piko-Autopay: true`, one request runs challenge → pay → forward on the server side.
   - **Done when:** The F2 autopay item passes, and the buyer is charged exactly once.
   - **Depends on:** P1-10
 
-- [ ] **P1-13 Demo agent script** · `core` · S
+- [x] **P1-13 Demo agent script** · `core` · S
   - **Goal:** `scripts/agent.ts` runs the three-step loop against a running app with Sam's key and prints each step. It doubles as a test and as an example for the README.
   - **Done when:** It completes a paid call to Price History locally, and Sam's balance drops by $0.002.
   - **Depends on:** P1-10
@@ -187,7 +187,7 @@ Covers TEST_PLAN **F4**.
 - [ ] **P2-05 Webhook endpoint** · `paypal` `core` · M
   - **Goal:** `/api/paypal/webhook` verifies the signature with `PAYPAL_WEBHOOK_ID`, stores each event once in `webhook_events`, and sends it to a handler by type. This task covers `PAYMENT.CAPTURE.COMPLETED`; later phases register more handlers.
   - **Done when:** A replayed webhook credits nothing, and a bad signature gets a 400.
-  - **Depends on:** P2-04, and the webhook from PAYPAL_SETUP.md step 6 (`human`)
+  - **Depends on:** P2-04, and the tunnel and webhook from [PAYPAL_SETUP.md](PAYPAL_SETUP.md) steps 4–5 (`human`, moved here from P0-02). Once the app runs locally, ask the human to do them and put the Webhook ID in `PAYPAL_WEBHOOK_ID`.
 
 - [ ] **P2-06 Wallet screen** · `ui` `paypal` · L
   - **Goal:** The balance, a PayPal JS SDK v6 top-up button that explains a cancelled popup, the budget per task or day, the "notify above" setting, and keys (create, show once, revoke).
@@ -280,7 +280,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Depends on:** P5-02
 
 - [ ] **P5-04 Approvals** · `core` `ui` · M
-  - **Goal:** An "approval above" rule creates an Approval and returns 202 `approval_pending`. `GET /api/approvals/{id}` lets the agent poll. The Org console gets an approvals inbox to approve or deny.
+  - **Goal:** An "approval above" rule creates an Approval and returns 202 `approval_pending`. `GET /api/approvals/{id}` lets the agent poll. The Org console gets an approvals inbox to approve or deny. An autopay 202 must also carry the Challenge `nonce`, since the agent never saw the 402 ([API.md §2](API.md#2-the-paid-call-flow-x402-v2) "Approvals"); test that an approved autopay request can be completed.
   - **Done when:** The F5 approval item passes for both approve and deny.
   - **Depends on:** P5-03, P5-01
 
@@ -370,7 +370,7 @@ Covers TEST_PLAN **F8**.
 Covers TEST_PLAN **F3**, **F11**, and the rest of **F2** and **F10**.
 
 - [ ] **P8-01 Automatic refunds** · `core` · M
-  - **Goal:** An upstream 5xx or timeout writes three reversing entries, marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
+  - **Goal:** An upstream 5xx or timeout releases the Call's reservation without posting any ledger entries (in the `authorization` flow nothing is posted before the upstream answers), marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
   - **Done when:** Every F3 item passes.
   - **Depends on:** P1-10
 

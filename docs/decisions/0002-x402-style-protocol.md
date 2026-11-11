@@ -9,4 +9,4 @@ x402 (HTTP 402 → pay → retry with proof) is becoming the standard for agent 
 Piko follows x402's message shape and header names, defines scheme `paypal-ledger` on network `paypal:sandbox`, and exposes `/api/facilitator/{supported,verify,settle}`. An `X-Piko-Autopay` shortcut lets an agent with a key pay and call in one request.
 
 ## Consequences
-The positioning becomes "the fiat payment method x402 is missing" rather than another billing API. Still open: the spec's rules for registering a new scheme (DESIGN.md §19).
+The positioning becomes "the fiat payment method x402 is missing" rather than another billing API. The exact x402 v2 shapes and the rules for a custom scheme, left open here, are settled in [0011](0011-x402-v2-and-gemini-model.md): there is no registry, so nothing needs registering.

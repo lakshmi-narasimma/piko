@@ -94,6 +94,16 @@ const LISTINGS: ReadonlyArray<{
   },
 ];
 
+export interface SeedOptions {
+  /** Where the app runs. Listings point at the sample seller APIs under it. */
+  appBaseUrl: string;
+  /**
+   * Starts Sam's wallet with this many micro-USD instead of $0.00. For running a paid Call
+   * before PayPal top-ups (Phase 2) exist; the demo itself starts from a real top-up.
+   */
+  samWalletMicro?: bigint;
+}
+
 export interface SeedResult {
   /** Sam's raw agent Key, the only time it is available. */
   samKey: string;
@@ -102,10 +112,8 @@ export interface SeedResult {
 /**
  * Empties every application table, then creates the minimal demo world, all in one
  * transaction. TRUNCATE is the only way to clear the Ledger: its trigger rejects DELETE.
- *
- * @param appBaseUrl Where the app runs. Listings point at the sample seller APIs under it.
  */
-export function seed(db: Db, { appBaseUrl }: { appBaseUrl: string }): Promise<SeedResult> {
+export function seed(db: Db, { appBaseUrl, samWalletMicro }: SeedOptions): Promise<SeedResult> {
   const sellersBaseUrl = `${appBaseUrl.replace(/\/+$/, "")}/api/demo/sellers`;
 
   return db.transaction(async (tx) => {
@@ -170,6 +178,17 @@ export function seed(db: Db, { appBaseUrl }: { appBaseUrl: string }): Promise<Se
       reason: "seed",
       refId: PRIYA_SEED_REF,
     });
+
+    if (samWalletMicro && samWalletMicro > 0n) {
+      await tx.insert(ledgerEntries).values({
+        txnId: sql`gen_random_uuid()`,
+        accountType: "wallet",
+        orgId: samOrgId,
+        amountMicro: samWalletMicro,
+        reason: "seed",
+        refId: "seed:sam-wallet",
+      });
+    }
 
     return { samKey: samKey.rawKey };
   });

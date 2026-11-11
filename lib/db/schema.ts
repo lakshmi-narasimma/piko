@@ -11,6 +11,7 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -20,6 +21,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   vector,
@@ -109,7 +111,11 @@ export const teams = pgTable(
     frozenAt: at("frozen_at"),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("teams_org_name_unique").on(t.orgId, t.name)],
+  (t) => [
+    uniqueIndex("teams_org_name_unique").on(t.orgId, t.name),
+    // Lets agents reference a team together with its org.
+    unique("teams_id_org_unique").on(t.id, t.orgId),
+  ],
 );
 
 export const agents = pgTable(
@@ -119,7 +125,8 @@ export const agents = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => orgs.id),
-    teamId: uuid("team_id").references(() => teams.id),
+    // Must be a team in the same org: see agents_team_same_org_fk.
+    teamId: uuid("team_id"),
     name: text("name").notNull(),
     notifyAboveMicro: micro("notify_above_micro"),
     frozenAt: at("frozen_at"),
@@ -128,6 +135,12 @@ export const agents = pgTable(
   (t) => [
     uniqueIndex("agents_org_name_unique").on(t.orgId, t.name),
     index("agents_team_idx").on(t.teamId),
+    // A null team_id skips the check (MATCH SIMPLE), so an agent can have no team.
+    foreignKey({
+      name: "agents_team_same_org_fk",
+      columns: [t.teamId, t.orgId],
+      foreignColumns: [teams.id, teams.orgId],
+    }),
     check(
       "agents_notify_above_non_negative",
       sql`${t.notifyAboveMicro} is null or ${t.notifyAboveMicro} >= 0`,
@@ -158,7 +171,8 @@ export const budgets = pgTable(
       .notNull()
       .references(() => orgs.id),
     scopeType: budgetScope("scope_type").notNull(),
-    // An org, team or agent id, according to scope_type.
+    // An org, team or agent id, according to scope_type. Being polymorphic, it has no
+    // foreign key, so budget code must check that the scope belongs to org_id.
     scopeId: uuid("scope_id").notNull(),
     period: budgetPeriod("period").notNull(),
     maxMicro: micro("max_micro").notNull(),
@@ -205,7 +219,12 @@ export const listings = pgTable(
     embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("listings_seller_slug_unique").on(t.sellerOrgId, t.slug)],
+  (t) => [
+    uniqueIndex("listings_seller_slug_unique").on(t.sellerOrgId, t.slug),
+    // Lets endpoints reference a listing together with its seller.
+    unique("listings_id_seller_unique").on(t.id, t.sellerOrgId),
+    check("listings_rating_range", sql`${t.rating} between 0 and 5`),
+  ],
 );
 
 export const endpoints = pgTable(
@@ -215,6 +234,11 @@ export const endpoints = pgTable(
     listingId: uuid("listing_id")
       .notNull()
       .references(() => listings.id),
+    // The listing's seller, copied here so a route can be unique per seller. A trigger
+    // (migration 0003) fills it from the listing, so inserts leave it out.
+    sellerOrgId: uuid("seller_org_id")
+      .notNull()
+      .$defaultFn(() => sql`null`),
     // An HTTP method, or TOOL for an MCP tool.
     method: text("method").notNull(),
     pathOrTool: text("path_or_tool").notNull(),
@@ -224,6 +248,13 @@ export const endpoints = pgTable(
   },
   (t) => [
     uniqueIndex("endpoints_listing_route_unique").on(t.listingId, t.method, t.pathOrTool),
+    // The gateway URL /g/{seller}/{path} names no listing, so a route is unique per seller.
+    uniqueIndex("endpoints_seller_route_unique").on(t.sellerOrgId, t.method, t.pathOrTool),
+    foreignKey({
+      name: "endpoints_listing_seller_fk",
+      columns: [t.listingId, t.sellerOrgId],
+      foreignColumns: [listings.id, listings.sellerOrgId],
+    }).onUpdate("cascade"),
     check("endpoints_price_non_negative", sql`${t.priceMicro} >= 0`),
     check("endpoints_free_quota_non_negative", sql`${t.freeQuota} >= 0`),
   ],

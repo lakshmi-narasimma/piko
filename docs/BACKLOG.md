@@ -95,7 +95,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** The migration applies cleanly, and the schema matches §12. Any differences are written back into §12.
   - **Depends on:** P0-07
 
-- [ ] **P1-02 Money helpers** · `core` · S
+- [x] **P1-02 Money helpers** · `core` · S
   - **Goal:** Add a `MicroUsd` type, dollar parsing and formatting (display only), and the fee split from `PLATFORM_FEE_BPS`. The seller's share rounds down, and the remainder goes to the platform.
   - **Done when:** Unit tests cover even and uneven splits, such as 3 micro-USD, and no float ever touches an amount.
   - **Depends on:** P0-06
@@ -110,7 +110,7 @@ Covers TEST_PLAN **F1** and **F2**.
   - **Done when:** Tests cover a valid key, a revoked key and an unknown key.
   - **Depends on:** P1-01
 
-- [ ] **P1-05 `lib/llm` (Gemini with a Groq fallback)** · `ai` · S
+- [x] **P1-05 `lib/llm` (Gemini with a Groq fallback)** · `ai` · S
   - **Goal:** One module that every AI feature uses: text, structured output and embeddings through the Vercel AI SDK. It switches to Groq on rate limits, and throws a typed `AiBusy` error that the UI can show.
   - **Done when:** A smoke test calls Gemini, and a forced failure falls back to Groq or throws `AiBusy`.
   - **Depends on:** P0-06, P0-05

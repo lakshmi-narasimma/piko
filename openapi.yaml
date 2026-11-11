@@ -187,7 +187,7 @@ paths:
       summary: Semantic search over listings, priced for the caller's org
       parameters:
         - { name: q, in: query, required: true, schema: { type: string } }
-        - { name: limit, in: query, required: false, schema: { type: integer, default: 10, maximum: 50 } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 5, minimum: 1, maximum: 20 } }
       responses:
         "200":
           description: Matching listings
@@ -199,6 +199,13 @@ paths:
                   results:
                     type: array
                     items: { $ref: "#/components/schemas/Listing" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "503":
+          description: The embedding model is busy (`ai_busy`). Try again shortly.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/wallet:
     get:
@@ -416,12 +423,19 @@ components:
     Listing:
       type: object
       properties:
+        id: { type: string, format: uuid }
         slug: { type: string }
         name: { type: string }
         description: { type: string }
-        kind: { type: string, enum: [http, mcp] }
-        rating: { type: number }
-        seller: { type: string }
+        category: { type: [string, "null"] }
+        kind: { type: string, enum: [http, mcp, both] }
+        rating: { type: [string, "null"], description: "0 to 5, one decimal." }
+        seller:
+          type: object
+          properties:
+            slug: { type: string }
+            name: { type: string }
+        score: { type: number, description: "Cosine similarity to the query, 0 to 1. Results are best first." }
         endpoints:
           type: array
           items:
@@ -429,9 +443,9 @@ components:
             properties:
               method: { type: string }
               path: { type: string }
-              description: { type: string }
-              price: { $ref: "#/components/schemas/MicroUsd" }
-              freeQuota: { type: integer }
+              priceMicro: { $ref: "#/components/schemas/MicroUsd", description: "What the caller's org pays: its enterprise rate if it has one, else the list price." }
+              price: { type: string, description: "priceMicro for display, e.g. $0.002." }
+              gatewayPath: { type: string, description: "Where to send the request: /g/{seller}{path}." }
 
     Wallet:
       type: object

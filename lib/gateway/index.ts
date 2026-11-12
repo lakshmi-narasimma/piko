@@ -6,7 +6,7 @@
  */
 import type { Db } from "../db/client";
 import { getEnv } from "../env";
-import { jsonError } from "../http";
+import { jsonError, orInternalError } from "../http";
 import { authenticateRequest, type AuthenticatedAgent } from "../keys";
 import { claimReservation, releaseReservation } from "../ledger";
 import { payErrorResponse, PayError, runPayPipeline, type IssuedReceipt } from "../pay";
@@ -25,7 +25,10 @@ import { issueChallenge } from "./challenge";
 import {
   AUTOPAY_HEADER,
   forwardUpstream,
+  PROXIED_RESPONSE_HEADERS,
   readForwardableBody,
+  upstreamSecretFor,
+  upstreamUrl,
   type UpstreamResult,
 } from "./forward";
 import { claimFreeCall, completeFreeCall, recordZeroPriceCall, releaseFreeCall } from "./free";
@@ -42,6 +45,8 @@ export interface GatewayConfig extends X402Config {
   upstreamTimeoutMs: number;
   /** How long reading the request body may take. Defaults to upstreamTimeoutMs. */
   bodyTimeoutMs?: number;
+  /** Sent only to the sample seller APIs under `${appBaseUrl}/api/demo/sellers/`. */
+  demoUpstreamSecret?: string;
 }
 
 /** Extra hold time beyond reading and forwarding, for the database work around them. */
@@ -57,7 +62,12 @@ export interface GatewayDeps {
 }
 
 export function gatewayConfigFromEnv(): GatewayConfig {
-  return { ...x402ConfigFromEnv(), upstreamTimeoutMs: getEnv().UPSTREAM_TIMEOUT_MS };
+  const env = getEnv();
+  return {
+    ...x402ConfigFromEnv(env),
+    upstreamTimeoutMs: env.UPSTREAM_TIMEOUT_MS,
+    demoUpstreamSecret: env.DEMO_UPSTREAM_SECRET,
+  };
 }
 
 /** What a browser caller may read and send. Answered on every gateway response. */
@@ -98,7 +108,9 @@ function bodyTimedOut(): Response {
 function upstreamResponse(result: Extract<UpstreamResult, { ok: true }>): Response {
   // A Response with one of these statuses must not have a body at all, even an empty one.
   const body = [204, 205, 304].includes(result.status) ? null : result.body;
-  return new Response(body, { status: result.status, headers: result.headers });
+  const headers = new Headers(result.headers);
+  for (const [name, value] of Object.entries(PROXIED_RESPONSE_HEADERS)) headers.set(name, value);
+  return new Response(body, { status: result.status, headers });
 }
 
 /**
@@ -119,7 +131,7 @@ async function serveFreeCall(
   }
   const result = await forwardUpstream(route, request, body.body, {
     timeoutMs: config.upstreamTimeoutMs,
-    upstreamSecret: null,
+    upstreamSecret: upstreamSecretFor(upstreamUrl(route, request), config),
   });
   if (!result.ok) {
     if (callId) await releaseFreeCall(db, callId);
@@ -193,7 +205,7 @@ async function servePaidCall(
   }
   const result = await forwardUpstream(route, request, body.body, {
     timeoutMs: config.upstreamTimeoutMs,
-    upstreamSecret: null,
+    upstreamSecret: upstreamSecretFor(upstreamUrl(route, request), config),
   });
   if (!result.ok) {
     await releaseReservation(db, claims.nonce);
@@ -321,7 +333,11 @@ async function handle(
   });
 }
 
-/** Handles any method on `/g/{seller}/{path}`. Every response carries the CORS headers. */
+/**
+ * Handles any method on `/g/{seller}/{path}`. Every response carries the CORS headers.
+ * An unexpected failure is logged here and answered with the documented error body,
+ * `500 internal_error`, never with its details.
+ */
 export async function handleGatewayRequest(
   deps: GatewayDeps,
   request: Request,
@@ -329,5 +345,9 @@ export async function handleGatewayRequest(
 ): Promise<Response> {
   // A preflight is answered before anything else, so it can never be asked to pay.
   if (request.method === "OPTIONS") return withCors(new Response(null, { status: 204 }));
-  return withCors(await handle(deps, request, params));
+  return withCors(
+    await orInternalError(`${request.method} /g/${params.seller}`, () =>
+      handle(deps, request, params),
+    ),
+  );
 }

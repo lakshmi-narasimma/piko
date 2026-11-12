@@ -74,9 +74,10 @@ Done when: the dashboard's webhook simulator can send a `PAYMENT.CAPTURE.COMPLET
 3. In the SQL editor, run `CREATE EXTENSION IF NOT EXISTS vector;`. If it fails, tell Claude, and directory search will fall back to in-app similarity.
 
 ## 9. Secrets you generate
-Run `openssl rand -base64 32` twice:
+Run `openssl rand -base64 48` three times (the app refuses values under 32 characters and the `change-me` placeholder):
 - the first result → `SESSION_SECRET`
 - the second → `RECEIPT_SIGNING_SECRET`
+- the third → `DEMO_UPSTREAM_SECRET` (the gateway sends it to the sample seller APIs)
 
 ## 10. Ask on the PayPal Discord
 In the hackathon Discord, ask: *"Can hackathon participants get sandbox access to the limited-release Usage-based Billing API?"* Record the answer in [DESIGN.md §19](DESIGN.md#19-open-items).

@@ -20,8 +20,9 @@ const url = inject("testDatabaseUrl");
 // postCall reads PLATFORM_FEE_BPS through getEnv, which validates the whole environment.
 const ENV = {
   APP_BASE_URL: "http://localhost:3000",
-  SESSION_SECRET: "test",
-  RECEIPT_SIGNING_SECRET: "test",
+  SESSION_SECRET: "test-session-secret-0123456789abcdef",
+  RECEIPT_SIGNING_SECRET: "test-receipt-secret-0123456789abcdef",
+  DEMO_UPSTREAM_SECRET: "test-demo-upstream-secret-0123456789",
   DATABASE_URL: "postgresql://unused@localhost/unused",
   DATABASE_URL_POOLED: "postgresql://unused@localhost/unused",
   PAYPAL_CLIENT_ID: "test",

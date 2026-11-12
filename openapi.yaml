@@ -118,7 +118,10 @@ paths:
         "410": { $ref: "#/components/responses/Error" }
         "423": { $ref: "#/components/responses/Error" }
         "502":
-          description: Upstream failed; nothing was charged
+          description: |
+            The upstream answered 5xx or timed out (code upstream_failed); nothing was charged.
+            For a paid Call, details refunded true and callId (the Call, recorded with status
+            refunded and no Ledger entries). For a free or $0 Call, refunded false and no callId.
           headers:
             PAYMENT-RESPONSE:
               schema: { type: string }

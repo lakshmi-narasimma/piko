@@ -265,15 +265,20 @@ export async function claimReservation(db: DbOrTx, input: ClaimReservationInput)
  * charged, so nothing needs reversing. Writes no Ledger entry. The Challenge expires too,
  * so it can't be paid again and its Receipt can never become valid again; the agent asks
  * for a new 402.
+ *
+ * Returns false when the Challenge is unknown or was already settled, so there was
+ * nothing to release.
  */
-export async function releaseReservation(db: DbOrTx, nonce: string): Promise<void> {
-  await db
+export async function releaseReservation(db: DbOrTx, nonce: string): Promise<boolean> {
+  const released = await db
     .update(challenges)
     .set({
       reservationExpiresAt: sql`least(${challenges.reservationExpiresAt}, ${now})`,
       expiresAt: sql`least(${challenges.expiresAt}, ${now})`,
     })
-    .where(and(eq(challenges.nonce, nonce), isNull(challenges.consumedAt)));
+    .where(and(eq(challenges.nonce, nonce), isNull(challenges.consumedAt)))
+    .returning({ nonce: challenges.nonce });
+  return released.length > 0;
 }
 
 /**

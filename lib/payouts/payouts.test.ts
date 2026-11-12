@@ -122,7 +122,10 @@ describe.skipIf(!url)("Payouts", () => {
       }),
     ]);
     const [row] = await db.select().from(payouts).where(eq(payouts.id, payout.id));
-    expect(row).toMatchObject({ status: "pending", paypalBatchId: expect.stringMatching(/^BATCH-/) });
+    expect(row).toMatchObject({
+      status: "pending",
+      paypalBatchId: expect.stringMatching(/^BATCH-/),
+    });
   });
 
   it("pays out on its own when a settle takes Priya from $0.94 past $1.00", async () => {
@@ -146,7 +149,10 @@ describe.skipIf(!url)("Payouts", () => {
 
     const payout = await maybeAutoPayout({ db, paypal, thresholdMicro: THRESHOLD }, orgId);
     const wholeCents = (balance / 10_000n) * 10_000n;
-    expect(payout).toMatchObject({ amountMicro: wholeCents, paypalBatchId: expect.stringMatching(/^BATCH-/) });
+    expect(payout).toMatchObject({
+      amountMicro: wholeCents,
+      paypalBatchId: expect.stringMatching(/^BATCH-/),
+    });
     expect(sent).toHaveLength(1);
     expect(await sellerBalance(orgId)).toBe(balance - wholeCents);
 

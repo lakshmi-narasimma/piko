@@ -299,7 +299,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** The F6 team-freeze and org-freeze items pass.
   - **Depends on:** P5-06, P5-01
 
-- [ ] **P5-08 Alerts** · `ui` · S
+- [x] **P5-08 Alerts** · `ui` · S
   - **Goal:** An alerts panel in the Org console for breaker trips, budget hits and denials, with a badge on the navigation.
   - **Done when:** A breaker trip shows as an alert within a few seconds.
   - **Depends on:** P5-06

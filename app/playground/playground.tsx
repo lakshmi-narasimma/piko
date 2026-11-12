@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CallFeed } from "@/components/call-feed";
 import { formatUsd } from "@/lib/money";
+import { CheckoutButton } from "./checkout-button";
 
 const DEFAULT_PROMPT = "Find me the best 4K monitor under $300 that's actually in stock";
 
@@ -109,7 +110,7 @@ function apply(state: RunState, event: ServerEvent): RunState {
   }
 }
 
-export function Playground() {
+export function Playground({ paypalClientId }: { paypalClientId: string }) {
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [run, setRun] = useState<RunState>(idle);
   const [asked, setAsked] = useState("");
@@ -246,7 +247,12 @@ export function Playground() {
             <div className="rounded-lg border border-line bg-surface p-4">
               <p className="text-sm text-muted">Recommended</p>
               <p className="font-medium">{run.recommendation.name}</p>
-              <p>{formatUsd(BigInt(run.recommendation.priceMicro))}</p>
+              <p className="mb-3">{formatUsd(BigInt(run.recommendation.priceMicro))}</p>
+              <CheckoutButton
+                clientId={paypalClientId}
+                name={run.recommendation.name}
+                priceMicro={BigInt(run.recommendation.priceMicro)}
+              />
             </div>
           )}
         </section>

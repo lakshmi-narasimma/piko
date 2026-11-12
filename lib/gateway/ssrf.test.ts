@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { checkUpstreamUrl, isAppDemoUrl, isBlockedAddress, type LookupFn } from "./ssrf";
+import {
+  checkUpstreamUrl,
+  isAppDemoUrl,
+  isBlockedAddress,
+  LOOKUP_TIMEOUT_MS,
+  type LookupFn,
+} from "./ssrf";
 
 const APP = "https://piko.test";
 
@@ -47,13 +53,16 @@ describe("isBlockedAddress", () => {
 });
 
 describe("isAppDemoUrl", () => {
-  it("matches only /api/demo on the app's origin", () => {
+  it("matches only /api/demo/sellers/ on the app's origin", () => {
     expect(isAppDemoUrl(new URL("https://piko.test/api/demo/sellers/x"), APP)).toBe(true);
-    expect(isAppDemoUrl(new URL("https://piko.test/api/demo"), APP)).toBe(true);
+    expect(isAppDemoUrl(new URL("https://piko.test/api/demo/sellers"), APP)).toBe(false);
+    expect(isAppDemoUrl(new URL("https://piko.test/api/demo/sellers-x/y"), APP)).toBe(false);
+    expect(isAppDemoUrl(new URL("https://piko.test/api/demo"), APP)).toBe(false);
+    expect(isAppDemoUrl(new URL("https://piko.test/api/demo/simulate"), APP)).toBe(false);
     expect(isAppDemoUrl(new URL("https://piko.test/api/demolition"), APP)).toBe(false);
-    expect(isAppDemoUrl(new URL("https://piko.test/api/demo/../pay"), APP)).toBe(false);
-    expect(isAppDemoUrl(new URL("http://piko.test/api/demo"), APP)).toBe(false);
-    expect(isAppDemoUrl(new URL("https://evil.test/api/demo"), APP)).toBe(false);
+    expect(isAppDemoUrl(new URL("https://piko.test/api/demo/sellers/../../pay"), APP)).toBe(false);
+    expect(isAppDemoUrl(new URL("http://piko.test/api/demo/sellers/x"), APP)).toBe(false);
+    expect(isAppDemoUrl(new URL("https://evil.test/api/demo/sellers/x"), APP)).toBe(false);
   });
 });
 
@@ -85,16 +94,53 @@ describe("checkUpstreamUrl", () => {
     expect(result).toMatchObject({ ok: true, demo: true });
   });
 
-  it("refuses the rest of the app's own origin", async () => {
-    const result = await checkUpstreamUrl("https://piko.test/g/priya", {
-      appBaseUrl: APP,
-      lookup: resolvesTo("93.184.216.34"),
-    });
-    expect(result).toMatchObject({ ok: false, reason: "blocked_address" });
+  it.each(["https://piko.test/g/priya", "https://piko.test/api/demo/simulate"])(
+    "refuses the rest of the app's own origin: %s",
+    async (raw) => {
+      const result = await checkUpstreamUrl(raw, {
+        appBaseUrl: APP,
+        lookup: resolvesTo("93.184.216.34"),
+      });
+      expect(result).toMatchObject({ ok: false, reason: "blocked_address" });
+    },
+  );
+
+  it.each([
+    "https://api.seller.example:8443",
+    "http://api.seller.example:22",
+    "http://8.8.8.8:6379",
+  ])("refuses a non-web port: %s", async (raw) => {
+    const lookup = resolvesTo("93.184.216.34");
+    const result = await checkUpstreamUrl(raw, { appBaseUrl: APP, lookup });
+    expect(result).toMatchObject({ ok: false, reason: "blocked_port" });
   });
 
   it.each([
-    "http://127.0.0.1:8080",
+    "http://api.seller.example:80",
+    "https://api.seller.example:443",
+    "http://api.seller.example:443",
+  ])("allows web port %s", async (raw) => {
+    const result = await checkUpstreamUrl(raw, {
+      appBaseUrl: APP,
+      lookup: resolvesTo("93.184.216.34"),
+    });
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it("gives up on a DNS lookup that takes too long", async () => {
+    vi.useFakeTimers();
+    try {
+      const lookup: LookupFn = vi.fn(() => new Promise<never>(() => {}));
+      const pending = checkUpstreamUrl("https://slow.seller.example", { appBaseUrl: APP, lookup });
+      await vi.advanceTimersByTimeAsync(LOOKUP_TIMEOUT_MS);
+      await expect(pending).resolves.toMatchObject({ ok: false, reason: "unresolvable_host" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    "http://127.0.0.1",
     "http://localhost/api/demo",
     "http://10.1.2.3",
     "http://192.168.0.10/x",

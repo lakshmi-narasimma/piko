@@ -1,15 +1,23 @@
 /**
  * SSRF guard for seller upstream URLs. Piko fetches whatever base URL a seller lists, so a
  * Listing must not point at the server's own network: loopback, private ranges, link-local
- * (which holds the cloud metadata address 169.254.169.254), CGNAT and the like. The one
- * exception is the app's own `/api/demo` routes, where the seeded demo sellers live.
+ * (which holds the cloud metadata address 169.254.169.254), CGNAT and the like. Only the web
+ * ports 80 and 443 are allowed. The one exception is the app's own sample seller APIs under
+ * `${APP_BASE_URL}/api/demo/sellers/` (the same prefix the gateway sends DEMO_UPSTREAM_SECRET
+ * to), which skip the DNS lookup; any other URL on the app's own origin is refused.
  *
- * `checkUpstreamUrl` resolves the hostname and refuses the URL if any address it resolves
- * to is blocked. Onboarding (lib/listings) calls it once. A hostname's DNS can change after
- * that (DNS rebinding), so the gateway should check again at forward time (P4-02).
+ * `checkUpstreamUrl` resolves the hostname (giving up after LOOKUP_TIMEOUT_MS) and refuses the
+ * URL if any address it resolves to is blocked. It runs twice: once when a Listing is saved
+ * (lib/listings), and again before every upstream fetch (`vetUpstream` in lib/gateway),
+ * because a hostname's DNS can change after the Listing is saved (DNS rebinding). A refusal
+ * at forward time is an upstream failure: the hold is released and nothing is charged.
+ *
+ * The connection itself is not pinned to the vetted address, so a record with a very short
+ * TTL could still change between this check and fetch's own lookup.
  */
 import { lookup as dnsLookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
+import { DEMO_SELLERS_PATH } from "./forward";
 
 /** Resolves a hostname to every address it has, like `dns.promises.lookup(h, { all: true })`. */
 export type LookupFn = (hostname: string) => Promise<Array<{ address: string; family: number }>>;
@@ -18,23 +26,30 @@ export const defaultLookup: LookupFn = (hostname) =>
   dnsLookup(hostname, { all: true, verbatim: true });
 
 export interface UpstreamUrlPolicy {
-  /** APP_BASE_URL. URLs under `${appBaseUrl}/api/demo` are allowed without a DNS check. */
+  /** APP_BASE_URL. URLs under `${appBaseUrl}/api/demo/sellers/` pass without a DNS check. */
   appBaseUrl: string;
   lookup?: LookupFn;
+  /** How long the DNS lookup may take before the host counts as unresolvable. */
+  lookupTimeoutMs?: number;
 }
+
+/** The default DNS lookup timeout, so a slow nameserver can't hold a request open. */
+export const LOOKUP_TIMEOUT_MS = 3_000;
+
+/** The ports a non-demo upstream may use ("" is the scheme's default port). */
+const WEB_PORTS = new Set(["", "80", "443"]);
 
 export type UpstreamUrlRefusal =
   | "invalid_url"
   | "unsupported_scheme"
   | "credentials_in_url"
   | "blocked_address"
+  | "blocked_port"
   | "unresolvable_host";
 
 export type UpstreamUrlCheck =
   | { ok: true; url: URL; demo: boolean }
   | { ok: false; reason: UpstreamUrlRefusal; message: string };
-
-const DEMO_PATH = "/api/demo";
 
 const blockedV4 = new BlockList();
 for (const [network, prefix] of [
@@ -120,12 +135,32 @@ export function isBlockedAddress(ip: string): boolean {
   return true;
 }
 
-/** True for a URL on the app's own origin under `/api/demo`. */
+/**
+ * True for a URL on the app's own origin under `/api/demo/sellers/`, where the sample seller
+ * APIs live. It matches upstreamSecretFor (lib/gateway/forward), so the exemption covers
+ * exactly the URLs that get DEMO_UPSTREAM_SECRET.
+ */
 export function isAppDemoUrl(url: URL, appBaseUrl: string): boolean {
   const app = new URL(appBaseUrl);
   if (url.origin !== app.origin) return false;
-  const root = `${app.pathname.replace(/\/+$/, "")}${DEMO_PATH}`;
-  return url.pathname === root || url.pathname.startsWith(`${root}/`);
+  // URL parsing has already resolved any "." or ".." segments in the path.
+  return url.pathname.startsWith(`${app.pathname.replace(/\/+$/, "")}${DEMO_SELLERS_PATH}/`);
+}
+
+/** Runs the lookup, treating an error or a lookup slower than `timeoutMs` as no addresses. */
+async function resolveWithin(lookup: LookupFn, host: string, timeoutMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<[]>((resolve) => {
+    timer = setTimeout(() => resolve([]), timeoutMs);
+  });
+  try {
+    const found = await Promise.race([lookup(host), deadline]);
+    return found.map((a) => a.address);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function refuse(reason: UpstreamUrlRefusal, message: string): UpstreamUrlCheck {
@@ -134,9 +169,9 @@ function refuse(reason: UpstreamUrlRefusal, message: string): UpstreamUrlCheck {
 
 /**
  * Checks that a seller's upstream URL is safe for Piko to fetch. The URL must be http or
- * https with no username or password, and its hostname must resolve only to public
- * addresses. URLs under the app's own `/api/demo` pass; any other URL on the app's own
- * origin is refused, so a Listing can't loop back into Piko.
+ * https with no username or password, on port 80 or 443, and its hostname must resolve only
+ * to public addresses. URLs under the app's own `/api/demo/sellers/` pass; any other URL on
+ * the app's own origin is refused, so a Listing can't loop back into Piko.
  */
 export async function checkUpstreamUrl(
   raw: string,
@@ -158,17 +193,16 @@ export async function checkUpstreamUrl(
   if (url.origin === new URL(policy.appBaseUrl).origin) {
     return refuse("blocked_address", "The base URL can't point at Piko itself.");
   }
-
   const host = url.hostname.replace(/^\[|\]$/g, "");
   let addresses: string[];
   if (isIP(host)) {
     addresses = [host];
   } else {
-    try {
-      addresses = (await (policy.lookup ?? defaultLookup)(host)).map((a) => a.address);
-    } catch {
-      addresses = [];
-    }
+    addresses = await resolveWithin(
+      policy.lookup ?? defaultLookup,
+      host,
+      policy.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS,
+    );
     if (addresses.length === 0) {
       return refuse("unresolvable_host", `The host ${host} could not be resolved.`);
     }
@@ -178,6 +212,9 @@ export async function checkUpstreamUrl(
       "blocked_address",
       "The base URL points at a private, loopback or link-local address. Use a public URL.",
     );
+  }
+  if (!WEB_PORTS.has(url.port)) {
+    return refuse("blocked_port", "The base URL must use port 80 or 443.");
   }
   return { ok: true, url, demo: false };
 }

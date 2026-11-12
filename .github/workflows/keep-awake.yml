@@ -1,0 +1,24 @@
+# P9-05: Render's free instance sleeps after about 15 idle minutes and then takes about a minute
+# to wake. This pings the hosted demo every 10 minutes so judges don't hit a cold start.
+# GitHub may delay scheduled runs by a few minutes; that is fine for this purpose.
+name: Keep awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping the hosted demo
+        env:
+          URL: https://piko-pay.onrender.com/api/facilitator/supported
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "$URL" || echo 000)
+          echo "GET $URL -> $code"
+          test "$code" = "200"

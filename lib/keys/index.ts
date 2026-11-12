@@ -106,15 +106,45 @@ export async function authenticateKey(
   if (!row) return INVALID_KEY;
 
   const { agentFrozenAt, teamFrozenAt, orgFrozenAt, ...identity } = row;
-  const frozenScope: FrozenScope | null = orgFrozenAt
-    ? "org"
-    : teamFrozenAt
-      ? "team"
-      : agentFrozenAt
-        ? "agent"
-        : null;
+  return {
+    ok: true,
+    ...identity,
+    frozenScope: widestFrozenScope(agentFrozenAt, teamFrozenAt, orgFrozenAt),
+  };
+}
 
-  return { ok: true, ...identity, frozenScope };
+/** The widest kill switch that is on: org, then team, then agent. */
+function widestFrozenScope(
+  agentFrozenAt: Date | null,
+  teamFrozenAt: Date | null,
+  orgFrozenAt: Date | null,
+): FrozenScope | null {
+  if (orgFrozenAt) return "org";
+  if (teamFrozenAt) return "team";
+  if (agentFrozenAt) return "agent";
+  return null;
+}
+
+/**
+ * The kill switch that applies to an agent right now (its own, its team's or its org's),
+ * read fresh from the database. The gateway calls it when a Receipt is redeemed, because
+ * the freeze state captured when the Receipt was issued may be out of date. Null when the
+ * agent may spend, or when it does not exist.
+ */
+export async function currentFrozenScope(db: DbOrTx, agentId: string): Promise<FrozenScope | null> {
+  const [row] = await db
+    .select({
+      agentFrozenAt: agents.frozenAt,
+      teamFrozenAt: teams.frozenAt,
+      orgFrozenAt: orgs.frozenAt,
+    })
+    .from(agents)
+    .innerJoin(orgs, eq(agents.orgId, orgs.id))
+    .leftJoin(teams, eq(agents.teamId, teams.id))
+    .where(eq(agents.id, agentId))
+    .limit(1);
+  if (!row) return null;
+  return widestFrozenScope(row.agentFrozenAt, row.teamFrozenAt, row.orgFrozenAt);
 }
 
 /**

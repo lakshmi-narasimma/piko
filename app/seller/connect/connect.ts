@@ -150,6 +150,7 @@ export function errorState(error: ListingError, input: ReturnType<typeof listing
     }
     case "slug_taken":
     case "listing_limit":
+    case "not_found":
       return { error: error.message };
   }
 }

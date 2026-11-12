@@ -242,6 +242,8 @@ The URL is `https://<app>/mcp/<seller>`, for example `http://localhost:3000/mcp/
 | `POST /api/listings` | Create a Listing from a base URL, with its Endpoints and prices (see below). The pricing assistant reads the OpenAPI/docs text |
 | `POST /api/listings/{id}/suggest-pricing` | Gemini pricing assistant |
 | `CRUD /api/endpoints`, `/api/rate-overrides` | Prices and enterprise rates |
+
+The Seller console (`/seller`) changes an Endpoint's price and free allowance through a server action (`saveEndpoint` in `app/seller/actions.ts`, logic in `updateEndpoint` in `lib/listings`), not an HTTP route. Only a seller org's admin may use it, and only on their own org's Endpoints (the org comes from the session). The price is dollars as typed ("0.005", read with `parseUsd`), $0 to $100 per Call as for a new Listing; the free allowance is 0 to 1,000,000. The gateway reads both when each request arrives, so the next 402 carries the new amount at once; a Challenge already issued keeps the amount it was issued for.
 | `POST /api/payouts/withdraw` | Manual seller payout |
 | `POST /api/invoices/generate` | Build and send an org's monthly PayPal invoice now |
 | `POST /api/paypal/webhook` | PayPal events (idempotent on resource id) |

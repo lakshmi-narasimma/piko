@@ -1,6 +1,7 @@
 "use client";
 
 import { startTransition, useActionState, useRef, useState, type FormEvent } from "react";
+import { CopyButton } from "@/components/copy-button";
 import { connectApi } from "./actions";
 import type { ConnectedListing, ConnectState } from "./connect";
 
@@ -279,27 +280,6 @@ export function ConnectForm({ demoBaseUrl }: { demoBaseUrl: string }) {
         </button>
       </div>
     </form>
-  );
-}
-
-function CopyButton({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(value);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        } catch {
-          setCopied(false);
-        }
-      }}
-      className={`${button} shrink-0`}
-    >
-      {copied ? "Copied" : "Copy"} <span className="sr-only">{label}</span>
-    </button>
   );
 }
 

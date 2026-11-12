@@ -314,7 +314,7 @@ Covers TEST_PLAN **F5** and **F6**.
 ## Phase 6: Seller console and Payouts
 Covers TEST_PLAN **F7** and the rest of **F10**. With this phase done, the demo is complete.
 
-- [ ] **P6-01 Seller console** · `ui` · M
+- [x] **P6-01 Seller console** · `ui` · M
   - **Goal:** The listings, endpoints, prices and free allowances, editable, with the gateway URL and the earnings balance.
   - **Done when:** Priya can change a price, and the next challenge shows it.
   - **Depends on:** P4-04

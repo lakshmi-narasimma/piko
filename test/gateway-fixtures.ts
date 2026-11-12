@@ -6,6 +6,7 @@ import { vi } from "vitest";
 import type { Db } from "../lib/db/client";
 import { agents, endpoints, ledgerEntries, listings, orgs } from "../lib/db/schema";
 import type { GatewayConfig } from "../lib/gateway";
+import { checkUpstreamUrl, type UpstreamUrlCheck } from "../lib/gateway/ssrf";
 import { createKey } from "../lib/keys";
 
 /** What the gateway sends the sample seller APIs as X-Piko-Secret in tests. */
@@ -30,6 +31,22 @@ export function stubGatewayEnv(): void {
   for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
 }
 
+/**
+ * The forward-time SSRF check for tests: lets the gateway reach the local stub upstreams
+ * (startStubUpstream, on 127.0.0.1) and runs the real check, with no real DNS, on anything
+ * else. Tests of the check itself build a config without this.
+ */
+export async function allowStubUpstreams(url: string): Promise<UpstreamUrlCheck> {
+  const parsed = new URL(url);
+  if (parsed.hostname === "127.0.0.1") return { ok: true, url: parsed, demo: false };
+  return checkUpstreamUrl(url, {
+    appBaseUrl: "https://piko.test",
+    lookup: async () => {
+      throw new Error("no DNS in tests");
+    },
+  });
+}
+
 export const TEST_GATEWAY_CONFIG: GatewayConfig = {
   appBaseUrl: "https://piko.test",
   network: "paypal:sandbox",
@@ -38,6 +55,7 @@ export const TEST_GATEWAY_CONFIG: GatewayConfig = {
   receiptSigningSecret: "test-receipt-secret-0123456789abcdef",
   upstreamTimeoutMs: 2_000,
   demoUpstreamSecret: TEST_DEMO_UPSTREAM_SECRET,
+  checkUpstream: allowStubUpstreams,
 };
 
 export interface RecordedRequest {

@@ -34,6 +34,7 @@ import {
 import { claimFreeCall, completeFreeCall, recordZeroPriceCall, releaseFreeCall } from "./free";
 import { IDEMPOTENCY_KEY_HEADER, idempotentChallenge, idempotentReplay } from "./idempotency";
 import { findRoute, type GatewayRoute } from "./route";
+import { checkUpstreamUrl, type LookupFn, type UpstreamUrlCheck } from "./ssrf";
 import {
   settlePayment,
   verifyPayment,
@@ -47,6 +48,13 @@ export interface GatewayConfig extends X402Config {
   bodyTimeoutMs?: number;
   /** Sent only to the sample seller APIs under `${appBaseUrl}/api/demo/sellers/`. */
   demoUpstreamSecret?: string;
+  /** DNS lookup for the forward-time SSRF check. Tests pass a fake; defaults to the system's. */
+  upstreamLookup?: LookupFn;
+  /**
+   * Replaces the forward-time SSRF check. Tests only, so they can forward to a stub upstream
+   * on 127.0.0.1; never set from the environment. Defaults to checkUpstreamUrl.
+   */
+  checkUpstream?: (url: string) => Promise<UpstreamUrlCheck>;
 }
 
 /** Extra hold time beyond reading and forwarding, for the database work around them. */
@@ -114,6 +122,35 @@ function upstreamResponse(result: Extract<UpstreamResult, { ok: true }>): Respon
 }
 
 /**
+ * Re-checks the upstream URL against the SSRF guard (lib/gateway/ssrf), then forwards. The
+ * check also ran when the Listing was saved, but the host's DNS may point somewhere else now
+ * (DNS rebinding). A refused or unresolvable URL is never fetched: it comes back as an
+ * upstream failure, so the caller releases the hold and charges nothing. URLs under the
+ * app's own `/api/demo/sellers/` skip the lookup. Every forward path goes through here.
+ */
+async function vetAndForward(
+  config: GatewayConfig,
+  route: GatewayRoute,
+  request: Request,
+  body: ArrayBuffer | null,
+): Promise<UpstreamResult> {
+  const url = upstreamUrl(route, request);
+  const check = await (config.checkUpstream
+    ? config.checkUpstream(url)
+    : checkUpstreamUrl(url, { appBaseUrl: config.appBaseUrl, lookup: config.upstreamLookup }));
+  if (!check.ok) {
+    console.warn(
+      `Gateway refused the upstream of seller '${route.sellerSlug}' (${check.reason}); nothing charged`,
+    );
+    return { ok: false, status: null, latencyMs: 0 };
+  }
+  return forwardUpstream(route, request, body, {
+    timeoutMs: config.upstreamTimeoutMs,
+    upstreamSecret: upstreamSecretFor(url, config),
+  });
+}
+
+/**
  * Runs a free Call: forwards upstream and records it. An upstream failure gives the free
  * Call back and charges nothing. `callId` is null for a caller with no Key on a $0
  * Endpoint: there is no buyer to record the Call against.
@@ -129,10 +166,7 @@ async function serveFreeCall(
     if (callId) await releaseFreeCall(db, callId);
     return bodyTimedOut();
   }
-  const result = await forwardUpstream(route, request, body.body, {
-    timeoutMs: config.upstreamTimeoutMs,
-    upstreamSecret: upstreamSecretFor(upstreamUrl(route, request), config),
-  });
+  const result = await vetAndForward(config, route, request, body.body);
   if (!result.ok) {
     if (callId) await releaseFreeCall(db, callId);
     return jsonError(502, "upstream_failed", "The upstream API failed. Nothing was charged.", {
@@ -203,10 +237,7 @@ async function servePaidCall(
     await releaseReservation(db, claims.nonce);
     return bodyTimedOut();
   }
-  const result = await forwardUpstream(route, request, body.body, {
-    timeoutMs: config.upstreamTimeoutMs,
-    upstreamSecret: upstreamSecretFor(upstreamUrl(route, request), config),
-  });
+  const result = await vetAndForward(config, route, request, body.body);
   if (!result.ok) {
     await releaseReservation(db, claims.nonce);
     return withPaymentResponse(

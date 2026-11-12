@@ -239,7 +239,7 @@ Covers TEST_PLAN **F9**. This screen gets the most polish.
 ## Phase 4: Hosted gateway and the Directory screen
 Covers part of TEST_PLAN **F10**.
 
-- [ ] **P4-01 Listing onboarding API** · `core` · M
+- [x] **P4-01 Listing onboarding API** · `core` · M
   - **Goal:** Create a listing from a base URL: a slug, its endpoints and prices, and an embedding when it's published. Guard against SSRF by blocking private and loopback addresses, except the app's own `/api/demo` URLs.
   - **Done when:** A new listing's `/g/<slug>/…` URL returns 402, and a private IP is refused.
   - **Depends on:** P1-10, P3-01

@@ -130,7 +130,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "502":
-          description: Upstream failed; nothing was charged
+          description: Upstream failed, timed out, or its URL was refused by the SSRF re-check; nothing was charged
           headers:
             PAYMENT-RESPONSE:
               schema: { type: string }

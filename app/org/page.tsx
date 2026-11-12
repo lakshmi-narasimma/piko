@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { AlertsPanel } from "@/components/alerts-panel";
+import { listPendingApprovals } from "@/lib/approvals";
 import { requirePrincipal } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { formatUsd } from "@/lib/money";
 import { loadOrgTree, type Spend, type TreeAgent, type TreeBudget } from "@/lib/org";
 import { isOrgFrozen } from "@/lib/org/freeze";
 import { listPolicies } from "@/lib/policy/list";
+import { ApprovalsInbox } from "./approvals-inbox";
 import { FreezeButton, FrozenBadge, OrgFreezeSwitch } from "./freeze-controls";
 import { PolicyCompiler } from "./policy-compiler";
 import { CreateAgentForm, CreateTeamForm, MoveAgentForm, type TeamOption } from "./tree-forms";
@@ -86,10 +88,11 @@ function AgentRow({
 async function OrgConsoleContent() {
   const { org, role } = await requirePrincipal("org");
   const canEdit = role === "admin";
-  const [tree, orgFrozen, savedPolicies] = await Promise.all([
+  const [tree, orgFrozen, savedPolicies, pendingApprovals] = await Promise.all([
     loadOrgTree(getDb(), org.id),
     isOrgFrozen(getDb(), org.id),
     canEdit ? listPolicies(getDb(), org.id) : [],
+    listPendingApprovals(getDb(), org.id),
   ]);
   const teamOptions = tree.teams.map(({ id, name }) => ({ id, name }));
   const agentCount =
@@ -130,6 +133,19 @@ async function OrgConsoleContent() {
           </span>
         </div>
       </section>
+
+      {canEdit && (
+        <ApprovalsInbox
+          items={pendingApprovals.map((a) => ({
+            id: a.id,
+            agent: a.agent,
+            listing: a.listing,
+            path: a.path,
+            amount: formatUsd(a.amountMicro),
+            createdAt: a.createdAt.toISOString(),
+          }))}
+        />
+      )}
 
       {canEdit && <AlertsPanel />}
 

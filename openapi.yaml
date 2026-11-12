@@ -183,7 +183,9 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Receipt" }
         "202":
-          description: Approval pending (code approval_pending)
+          description: |
+            Approval pending (code approval_pending). Details: approvalId, pollUrl,
+            approvalUrl, nonce (the Challenge to pay once approved), amount, policyId, policy.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -215,6 +217,9 @@ paths:
       tags: [Payments]
       operationId: getApproval
       summary: Poll an approval
+      description: |
+        Needs the agent Key. Once approved, the response also carries the Receipt for the
+        Challenge (the pay pipeline runs on poll), or paymentError if the payment itself stopped.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
@@ -223,6 +228,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Approval" }
+        "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
   /api/directory/search:
@@ -482,11 +488,22 @@ components:
 
     Approval:
       type: object
+      required: [id, status, amount, nonce, createdAt, pollUrl, approvalUrl]
       properties:
-        id: { type: string }
+        id: { type: string, format: uuid }
         status: { type: string, enum: [pending, approved, denied] }
         amount: { $ref: "#/components/schemas/MicroUsd" }
-        receipt: { type: string, description: Present once approved }
+        nonce: { type: string, description: The Challenge this approval is for }
+        createdAt: { type: string, format: date-time }
+        decidedAt: { type: [string, "null"], format: date-time }
+        pollUrl: { type: string }
+        approvalUrl: { type: string, description: The Org console inbox }
+        receipt: { type: string, description: Present once approved and paid }
+        paymentSignature: { type: string, description: Present with receipt; send as PAYMENT-SIGNATURE }
+        expiresAt: { type: string, format: date-time, description: Present with receipt }
+        paymentError:
+          type: object
+          description: Present when approved but the payment itself stopped (a docs/API.md section 4 error body's contents)
 
     Listing:
       type: object

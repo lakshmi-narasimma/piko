@@ -14,6 +14,7 @@ import {
   type BreakerLimits,
 } from "../breaker";
 import { recordBudgetAlert, recordPolicyAlert } from "../alerts";
+import { approvalUrls, requestApproval } from "../approvals";
 import { BudgetExceededError, enforceBudgets, type BudgetState } from "../budgets";
 import type { Db } from "../db/client";
 import { challenges, endpoints, listings, orgs } from "../db/schema";
@@ -260,7 +261,7 @@ const breakerRecount: PayStep = {
 /** DESIGN.md section 9, step 3: vendor block and allow, max price, approval above. */
 const checkPolicies: PayStep = {
   name: "policy",
-  async run({ db, agent, challenge }) {
+  async run({ db, config, agent, challenge, nonce }) {
     const policies = await loadPolicies(db, agent!.orgId);
     if (policies.length === 0) return;
     const [vendor] = await db
@@ -293,13 +294,36 @@ const checkPolicies: PayStep = {
       );
     }
     if (decision.outcome === "needs_approval") {
-      // TODO(P5-04): create an Approval and answer 202 approval_pending. Until approvals
-      // exist, a payment over the threshold is denied rather than let through unapproved.
-      throw new PolicyBlockedError(
-        decision.policyName,
-        `Payments over ${formatUsd(decision.thresholdMicro)} need an approval, and approvals aren't available yet.`,
-        decision.policyId,
-        "approval_above",
+      // One Approval per Challenge: a retry or a poll finds the same one.
+      const approval = await requestApproval(db, {
+        nonce: nonce!,
+        agentId: agent!.agentId,
+        orgId: agent!.orgId,
+        policyId: decision.policyId,
+        amountMicro: challenge!.amountMicro,
+      });
+      if (approval.status === "approved") return; // The rest of the pipeline still runs.
+      if (approval.status === "denied") {
+        throw new PolicyBlockedError(
+          decision.policyName,
+          "An org admin denied this payment.",
+          decision.policyId,
+          "approval_above",
+        );
+      }
+      throw new PayError(
+        202,
+        "approval_pending",
+        `Payments over ${formatUsd(decision.thresholdMicro)} need an org admin's approval.`,
+        {
+          approvalId: approval.id,
+          ...approvalUrls(config.appBaseUrl, approval.id),
+          // Autopay callers never saw the Challenge; they need its nonce to pay once approved.
+          nonce: nonce!,
+          amount: approval.amountMicro.toString(),
+          policyId: decision.policyId,
+          policy: decision.policyName,
+        },
       );
     }
   },

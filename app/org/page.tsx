@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { AlertsPanel } from "@/components/alerts-panel";
 import { requirePrincipal } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { formatUsd } from "@/lib/money";
@@ -112,6 +113,8 @@ async function OrgConsoleContent() {
           </span>
         </div>
       </section>
+
+      {canEdit && <AlertsPanel />}
 
       <section aria-label="Teams and agents" className="flex flex-col gap-4">
         <h2 className="text-xl font-medium">Teams and agents</h2>

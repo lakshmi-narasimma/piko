@@ -2,13 +2,16 @@
  * Listing onboarding (BACKLOG P4-01): a seller turns an API's base URL into a Listing with
  * priced Endpoints, reachable at once through the hosted gateway `/g/{seller}/{path}`.
  *
- * - The base URL passes the SSRF guard (lib/gateway/ssrf) before anything is written.
- * - The Listing is embedded for the Directory when it is created. If the embedding model is
- *   busy (AiBusy), the Listing is still created with no vector and `embedded: false`; the
- *   Directory embeds it on its next search (lib/directory embedMissingListings).
+ * - The base URL passes the SSRF guard (lib/gateway/ssrf) before anything is written. The
+ *   gateway checks it again before every forward, since a host's DNS can change.
+ * - The cheap checks (the Listing cap, slug and route clashes) run before the embedding, so
+ *   a request that gets a 409 never spends an embedding call.
+ * - The Listing is embedded for the Directory when it is created. If embedding fails (the
+ *   model is busy, or any other error), the Listing is still created with no vector and
+ *   `embedded: false`; the Directory embeds it on its next search (embedMissingListings).
  * - The Listing and its Endpoints are written in one transaction.
  */
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, count, eq, inArray, like } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client";
 import { endpoints, listings } from "../db/schema";
@@ -20,6 +23,10 @@ import { formatUsd, parseUsd } from "../money";
 
 export const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 export const MAX_ENDPOINTS = 50;
+/** The most Listings one seller org may have, which limits spam on a shared demo login. */
+export const MAX_LISTINGS_PER_SELLER = 20;
+/** A Listing's description reaches the playground agent verbatim, so it is kept short. */
+export const MAX_DESCRIPTION_LENGTH = 500;
 /** The highest price per Call a seller may set: $100. */
 export const MAX_PRICE_MICRO = 100_000_000n;
 
@@ -83,7 +90,7 @@ export const createListingSchema = z
   .object({
     baseUrl: z.string().trim().min(1).max(2048),
     name: z.string().trim().min(1).max(120),
-    description: z.string().trim().min(1).max(2000),
+    description: z.string().trim().min(1).max(MAX_DESCRIPTION_LENGTH),
     category: z.string().trim().min(1).max(60).optional(),
     kind: z.enum(["http", "mcp", "both"]).default("http"),
     slug: z.string().regex(SLUG, "slug must be 1-48 lowercase letters, digits or '-'.").optional(),
@@ -115,7 +122,7 @@ export interface ListingSeller {
 export interface CreateListingDeps {
   db: Db;
   llm: EmbeddingLlm;
-  /** APP_BASE_URL: gateway URLs are built on it, and its `/api/demo` URLs skip the SSRF check. */
+  /** APP_BASE_URL: gateway URLs are built on it, and its `/api/demo/sellers/` URLs skip the DNS lookup. */
   appBaseUrl: string;
   /** DNS lookup for the SSRF check; tests pass a fake. */
   lookup?: LookupFn;
@@ -146,7 +153,12 @@ export interface CreatedListing {
 }
 
 export type ListingErrorCode =
-  "invalid_request" | "invalid_base_url" | "blocked_base_url" | "slug_taken" | "route_taken";
+  | "invalid_request"
+  | "invalid_base_url"
+  | "blocked_base_url"
+  | "slug_taken"
+  | "route_taken"
+  | "listing_limit";
 
 export class ListingError extends Error {
   constructor(
@@ -176,7 +188,7 @@ type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 /** The requested slug, or the first free one made from the name (`name`, `name-2`, ...). */
 async function chooseSlug(
-  tx: Tx,
+  tx: Db | Tx,
   sellerOrgId: string,
   requested: string | undefined,
   name: string,
@@ -197,6 +209,48 @@ async function chooseSlug(
   for (let n = 2; ; n++) {
     if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
   }
+}
+
+type ListingInput = z.output<typeof createListingSchema>;
+
+/**
+ * The checks that can refuse a Listing with a 409: the seller's Listing cap, a slug already
+ * taken and a route the seller already lists. Returns the slug to use. It runs before the
+ * embedding, so a refused request spends nothing, and again inside the transaction.
+ */
+async function checkAvailable(q: Db | Tx, sellerOrgId: string, input: ListingInput) {
+  const [owned] = await q
+    .select({ n: count() })
+    .from(listings)
+    .where(eq(listings.sellerOrgId, sellerOrgId));
+  if ((owned?.n ?? 0) >= MAX_LISTINGS_PER_SELLER) {
+    throw new ListingError(
+      409,
+      "listing_limit",
+      `A seller can have at most ${MAX_LISTINGS_PER_SELLER} Listings.`,
+      { limit: MAX_LISTINGS_PER_SELLER },
+    );
+  }
+
+  const slug = await chooseSlug(q, sellerOrgId, input.slug, input.name);
+
+  const clashes = await q
+    .select({ method: endpoints.method, path: endpoints.pathOrTool })
+    .from(endpoints)
+    .where(
+      and(
+        eq(endpoints.sellerOrgId, sellerOrgId),
+        inArray(
+          endpoints.pathOrTool,
+          input.endpoints.map((e) => e.path),
+        ),
+      ),
+    );
+  const clash = clashes.find((c) =>
+    input.endpoints.some((e) => e.method === c.method && e.path === c.path),
+  );
+  if (clash) throw routeTaken(clash);
+  return slug;
 }
 
 /** The unique-violation constraint name of a Postgres error, through Drizzle's wrapper. */
@@ -231,7 +285,10 @@ export async function createListing(
     lookup: deps.lookup,
   });
   if (!check.ok) {
-    const blocked = check.reason === "blocked_address" || check.reason === "unresolvable_host";
+    const blocked =
+      check.reason === "blocked_address" ||
+      check.reason === "blocked_port" ||
+      check.reason === "unresolvable_host";
     throw new ListingError(400, blocked ? "blocked_base_url" : "invalid_base_url", check.message, {
       reason: check.reason,
     });
@@ -245,6 +302,9 @@ export async function createListing(
   }
   const baseUrl = check.url.href.replace(/\/+$/, "");
 
+  // The cheap 409s first, so a request that can't succeed never spends an embedding call.
+  await checkAvailable(deps.db, seller.orgId, input);
+
   // Embed before the transaction, so no database transaction waits on the model.
   let embedding: number[] | null = null;
   try {
@@ -257,29 +317,14 @@ export async function createListing(
       }),
     );
   } catch (error) {
-    if (!isAiBusy(error)) throw error;
+    // The Listing is still created; the Directory embeds it on its next search.
+    if (!isAiBusy(error)) console.error("Embedding a new Listing failed", error);
   }
 
   try {
     return await deps.db.transaction(async (tx) => {
-      const slug = await chooseSlug(tx, seller.orgId, input.slug, input.name);
-
-      const clashes = await tx
-        .select({ method: endpoints.method, path: endpoints.pathOrTool })
-        .from(endpoints)
-        .where(
-          and(
-            eq(endpoints.sellerOrgId, seller.orgId),
-            inArray(
-              endpoints.pathOrTool,
-              input.endpoints.map((e) => e.path),
-            ),
-          ),
-        );
-      const clash = clashes.find((c) =>
-        input.endpoints.some((e) => e.method === c.method && e.path === c.path),
-      );
-      if (clash) throw routeTaken(clash);
+      // Again, since another request may have written a Listing while this one embedded.
+      const slug = await checkAvailable(tx, seller.orgId, input);
 
       const [listing] = await tx
         .insert(listings)

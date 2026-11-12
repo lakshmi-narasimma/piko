@@ -7,7 +7,14 @@ import { endpoints, listings, orgs } from "../db/schema";
 import { handleGatewayRequest } from "../gateway";
 import type { LookupFn } from "../gateway/ssrf";
 import { AiBusy } from "../llm";
-import { createListingSchema, handleCreateListing, slugify, type ListingCaller } from "./index";
+import {
+  createListingSchema,
+  handleCreateListing,
+  MAX_DESCRIPTION_LENGTH,
+  MAX_LISTINGS_PER_SELLER,
+  slugify,
+  type ListingCaller,
+} from "./index";
 
 const APP = "https://piko.test";
 const DIMENSIONS = 768;
@@ -75,6 +82,14 @@ describe("createListingSchema", () => {
       /listed twice/,
     ],
     [{ ...base, name: "", endpoints: [{ method: "GET", path: "/a", price: "1" }] }, /./],
+    [
+      {
+        ...base,
+        description: "x".repeat(MAX_DESCRIPTION_LENGTH + 1),
+        endpoints: [{ method: "GET", path: "/a", price: "1" }],
+      },
+      /500/,
+    ],
     [{ ...base, slug: "Bad Slug", endpoints: [{ method: "GET", path: "/a", price: "1" }] }, /slug/],
   ])("rejects bad input %#", (input, message) => {
     const found = issues(input);
@@ -348,17 +363,90 @@ describe.skipIf(!url)("POST /api/listings", () => {
     expect(row!.embedding).toBeNull();
   });
 
-  it("does not hide other embedding errors", async () => {
-    await expect(
-      post(
+  it("still creates the Listing, and logs, when embedding fails for another reason", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await post(
         listing({ name: "Broken", endpoints: [{ method: "GET", path: "/broken", price: "1" }] }),
         {
           embed: async () => {
             throw new Error("bad key");
           },
         },
-      ).response,
-    ).rejects.toThrow("bad key");
+      ).response;
+      expect(res.status).toBe(201);
+      const { listing: created } = await res.json();
+      expect(created.embedded).toBe(false);
+      const [row] = await db.select().from(listings).where(eq(listings.id, created.id));
+      expect(row!.embedding).toBeNull();
+      expect(logged).toHaveBeenCalledWith("Embedding a new Listing failed", expect.any(Error));
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("runs the 409 checks before spending an embedding call", async () => {
+    const first = await post(
+      listing({ name: "Cheap One", endpoints: [{ method: "GET", path: "/cheap", price: "1" }] }),
+    ).response;
+    expect(first.status).toBe(201);
+
+    const route = post(
+      listing({ name: "Cheap Two", endpoints: [{ method: "GET", path: "/cheap", price: "1" }] }),
+    );
+    expect((await route.response).status).toBe(409);
+    expect(route.model.embed).not.toHaveBeenCalled();
+
+    const slug = post(
+      listing({
+        name: "Cheap Three",
+        slug: "cheap-one",
+        endpoints: [{ method: "GET", path: "/cheap-3", price: "1" }],
+      }),
+    );
+    expect((await slug.response).status).toBe(409);
+    expect(slug.model.embed).not.toHaveBeenCalled();
+  });
+
+  it(`caps a seller at ${MAX_LISTINGS_PER_SELLER} Listings`, async () => {
+    const org = await makeOrg("prepaid", "company");
+    const caller: ListingCaller = { org, area: "seller", role: "admin" };
+    await db.insert(listings).values(
+      Array.from({ length: MAX_LISTINGS_PER_SELLER - 1 }, (_, i) => ({
+        sellerOrgId: org.id,
+        slug: `filler-${i}`,
+        name: `Filler ${i}`,
+        description: "Filler",
+        baseUrl: "https://api.seller.example",
+        kind: "http" as const,
+      })),
+    );
+
+    const last = await post(listing({ name: "Last One" }), { caller }).response;
+    expect(last.status).toBe(201);
+
+    const over = post(
+      listing({ name: "One Too Many", endpoints: [{ method: "GET", path: "/over", price: "1" }] }),
+      { caller },
+    );
+    const res = await over.response;
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatchObject({
+      code: "listing_limit",
+      limit: MAX_LISTINGS_PER_SELLER,
+    });
+    expect(over.model.embed).not.toHaveBeenCalled();
+    const owned = await db.select().from(listings).where(eq(listings.sellerOrgId, org.id));
+    expect(owned).toHaveLength(MAX_LISTINGS_PER_SELLER);
+  });
+
+  it("refuses a base URL on a non-web port", async () => {
+    const res = await post(listing({ baseUrl: "https://api.seller.example:8443" })).response;
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatchObject({
+      code: "blocked_base_url",
+      reason: "blocked_port",
+    });
   });
 
   it("answers 400 for a body that is not JSON or not a Listing", async () => {

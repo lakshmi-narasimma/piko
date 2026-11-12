@@ -239,7 +239,7 @@ Covers TEST_PLAN **F9**. This screen gets the most polish.
 ## Phase 4: Hosted gateway and the Directory screen
 Covers part of TEST_PLAN **F10**.
 
-- [ ] **P4-01 Listing onboarding API** · `core` · M
+- [x] **P4-01 Listing onboarding API** · `core` · M
   - **Goal:** Create a listing from a base URL: a slug, its endpoints and prices, and an embedding when it's published. Guard against SSRF by blocking private and loopback addresses, except the app's own `/api/demo` URLs.
   - **Done when:** A new listing's `/g/<slug>/…` URL returns 402, and a private IP is refused.
   - **Depends on:** P1-10, P3-01
@@ -289,7 +289,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** Both F5 compiler items pass.
   - **Depends on:** P5-03, P1-05
 
-- [ ] **P5-06 Circuit breaker** · `core` · M
+- [x] **P5-06 Circuit breaker** · `core` · M
   - **Goal:** `lib/breaker` keeps a sliding window per agent (`BREAKER_MAX_CALLS` per `BREAKER_WINDOW_SECONDS`) and a dollars-per-minute limit. Tripping it freezes the agent, writes an alert and returns 429 `breaker_tripped`. It's the second step in the pay pipeline.
   - **Done when:** The F6 breaker item passes with `loop-bot`.
   - **Depends on:** P1-09

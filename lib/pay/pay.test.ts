@@ -66,8 +66,10 @@ describe.skipIf(!url)("POST /api/pay", () => {
       "key",
       "frozen",
       "challenge",
+      "breaker",
       "budget",
       "funds",
+      "breaker-recount",
       "receipt",
     ]);
   });

@@ -22,6 +22,9 @@ describe("parseEnv", () => {
     expect(env.GEMINI_MODEL).toBe("gemini-3.6-flash");
     expect(env.PLATFORM_FEE_BPS).toBe(500);
     expect(env.PAYOUT_THRESHOLD_MICRO).toBe(1_000_000n);
+    expect(env.BREAKER_MAX_CALLS).toBe(50);
+    expect(env.BREAKER_WINDOW_SECONDS).toBe(10);
+    expect(env.BREAKER_MAX_MICRO_PER_MINUTE).toBe(2_000_000n);
     expect(env.DEMO_MODE).toBe(false);
   });
 
@@ -145,5 +148,13 @@ describe("parseEnv", () => {
       /PAYOUT_THRESHOLD_MICRO: must be a whole number/,
     );
     expect(() => parseEnv({ ...valid, PAYOUT_THRESHOLD_MICRO: "1.5" })).not.toThrow(/1\.5/);
+  });
+
+  it("rejects a breaker spend limit that is zero or not whole micro-USD", () => {
+    for (const value of ["0", "1.5", "-1"]) {
+      expect(() => parseEnv({ ...valid, BREAKER_MAX_MICRO_PER_MINUTE: value })).toThrow(
+        /BREAKER_MAX_MICRO_PER_MINUTE: must be a positive whole number/,
+      );
+    }
   });
 });

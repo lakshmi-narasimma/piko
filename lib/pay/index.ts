@@ -6,6 +6,13 @@
  * reserveFunds runs under the buyer org's lock.
  */
 import { eq, sql } from "drizzle-orm";
+import {
+  breakerLimitsFromEnv,
+  BreakerTrippedError,
+  checkBreaker,
+  confirmBreaker,
+  type BreakerLimits,
+} from "../breaker";
 import { BudgetExceededError, enforceBudgets } from "../budgets";
 import type { Db } from "../db/client";
 import { challenges, endpoints, listings, orgs } from "../db/schema";
@@ -46,6 +53,8 @@ export class PayError extends Error {
 export interface PayDeps {
   db: Db;
   config: X402Config;
+  /** The circuit breaker's limits. Read from the environment when left out. */
+  breaker?: BreakerLimits;
 }
 
 export interface IssuedReceipt {
@@ -97,6 +106,9 @@ const LEDGER_ERRORS: Partial<Record<LedgerErrorCode, [number, string, string]>> 
 };
 
 function asPayError(error: unknown): unknown {
+  if (error instanceof BreakerTrippedError) {
+    return new PayError(429, "breaker_tripped", error.message, error.details);
+  }
   if (error instanceof InsufficientFundsError) {
     return new PayError(402, "insufficient_funds", "Prepaid balance or credit limit is too low.", {
       balance: error.availableMicro.toString(),
@@ -180,6 +192,32 @@ const loadPayableChallenge: PayStep = {
       );
     }
     context.challenge = challenge;
+  },
+};
+
+/** DESIGN.md section 9, step 2. Trips before Policies and Budgets run. */
+const breaker: PayStep = {
+  name: "breaker",
+  async run({ db, breaker: limits, agent, nonce, challenge }) {
+    const payment = { agentId: agent!.agentId, orgId: agent!.orgId, nonce: nonce! };
+    await checkBreaker(
+      db,
+      { ...payment, amountMicro: challenge!.amountMicro },
+      limits ?? breakerLimitsFromEnv(),
+    ).catch((error: unknown) => {
+      throw asPayError(error);
+    });
+  },
+};
+
+/** The breaker's race-safe recount, once this payment's hold is committed. */
+const breakerRecount: PayStep = {
+  name: "breaker-recount",
+  async run({ db, breaker: limits, agent, reservation }) {
+    const payment = { agentId: agent!.agentId, orgId: agent!.orgId, nonce: reservation!.nonce };
+    await confirmBreaker(db, payment, limits ?? breakerLimitsFromEnv()).catch((error: unknown) => {
+      throw asPayError(error);
+    });
   },
 };
 
@@ -274,14 +312,17 @@ const issueReceipt: PayStep = {
 
 /**
  * Phase 5 adds its steps between `challenge` and `funds`, in the order DESIGN.md section 9
- * gives: breaker, then policies, then budgets (`budget`, the last before `funds`).
+ * gives: breaker, then policies, then budgets (`budget`, the last before `funds`). The
+ * breaker also recounts after `funds`, so a concurrent burst can't slip past it.
  */
 export const PAY_STEPS: readonly PayStep[] = [
   authenticateAgent,
   rejectFrozen,
   loadPayableChallenge,
+  breaker,
   checkBudgets,
   reserve,
+  breakerRecount,
   issueReceipt,
 ];
 

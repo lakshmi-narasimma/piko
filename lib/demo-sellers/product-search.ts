@@ -1,3 +1,5 @@
+import { rejectUnlessFromGateway } from "./auth";
+
 const CHANNEL3_SEARCH_URL = "https://api.trychannel3.com/v1/search";
 const SEARCH_TIMEOUT_MS = 5_000;
 const MAX_QUERY_LENGTH = 200;
@@ -42,6 +44,8 @@ export async function handleProductSearch(
     fetcher?: typeof fetch;
   } = {},
 ): Promise<Response> {
+  const rejected = rejectUnlessFromGateway(request);
+  if (rejected) return rejected;
   const query = new URL(request.url).searchParams.get("q")?.trim() ?? "";
   if (!query || query.length > MAX_QUERY_LENGTH) {
     return json({ error: `q must contain between 1 and ${MAX_QUERY_LENGTH} characters.` }, 400);

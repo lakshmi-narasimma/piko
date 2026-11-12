@@ -11,7 +11,7 @@ Amounts are always **integer micro-USD as strings** (`"2000"` = $0.002), so Java
 | Caller | How |
 |---|---|
 | Agent | `Authorization: Bearer pk_agent_<secret>`: an agent **Key** created in the Wallet or Org console. Piko stores only a hash plus the visible prefix. |
-| Seller upstream | No auth from Piko by default. Optionally, a seller sets a shared secret that Piko sends as `X-Piko-Secret` so their API can reject direct traffic. |
+| Seller upstream | No auth from Piko by default. Optionally, a seller sets a shared secret that Piko sends as `X-Piko-Secret` so their API can reject direct traffic. Any `X-Piko-Secret` a caller sends is dropped. The sample seller APIs under `${APP_BASE_URL}/api/demo/sellers/` get `DEMO_UPSTREAM_SECRET` (§6); no other upstream ever does. |
 | Dashboard | Session cookie (persona switcher in demo mode, email + password otherwise). |
 | PayPal webhooks | PayPal signature, checked with `PAYPAL_WEBHOOK_ID` through PayPal's verify-webhook-signature API. |
 
@@ -82,6 +82,8 @@ The price shown is already the buyer org's **enterprise rate** if one exists.
 **$0 endpoints.** An endpoint priced at 0 never gets a 402, so a Challenge always has a positive amount. The gateway forwards every request like a free Call, with no quota. With a Key it records a `free` Call of amount 0 (no Ledger entries); with no Key it forwards without recording a Call, since there is no buyer to record it against. A failed upstream returns `502 upstream_failed` with `refunded: false`.
 
 **Upstream redirects.** The gateway does not follow upstream redirects, and it never passes the seller's base URL back. A `Location` or `Content-Location` under the listing's base URL is rewritten to the matching root-relative `/g/{seller}/...` path; one elsewhere on the upstream's origin is dropped; one on another origin passes through unchanged.
+
+**Upstream response headers.** The gateway answers on the app's own origin, so a seller's response must not act there. It drops any `Set-Cookie` from the upstream (a seller can never set or overwrite a Piko cookie) and sets `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox` on every proxied response, replacing any the seller sent, so an HTML body can't run scripts as Piko.
 
 **Challenge cleanup.** About one 402 in ten also deletes up to 100 Challenges that expired over 5 minutes ago and were never reserved (and that no Call or Approval references). Within those 5 minutes a late payment still gets `410 challenge_expired`; after that the nonce is unknown.
 
@@ -173,6 +175,8 @@ The gateway never issues a $0 Challenge (a $0 endpoint is forwarded free, see §
 
 **Circuit breaker.** An agent trips it by paying for more than `BREAKER_MAX_CALLS` Calls in the last `BREAKER_WINDOW_SECONDS` (default 50 in 10 s), or more than `BREAKER_MAX_MICRO_PER_MINUTE` (default $2.00) in the last minute, counting the payment being made. What counts is every payment the agent reserved, whatever happened to it after (settled, refunded on an upstream failure, or never used); a retry of the same nonce counts once. A request stopped before the funds check reserves nothing and doesn't count, and free-allowance Calls never reach `/api/pay`. A trip freezes the agent, writes one `breaker_tripped` alert for the org and returns 429 with `calls` and `spentPerMinute` including this payment; the agent's next request gets `423 agent_frozen` until a human unfreezes it. The breaker counts again right after the funds check, so a concurrent burst can't get past it together: a request over the limit there also gets 429, and its hold is released, so nothing is charged. That recount can stop every request of a burst that crosses the limit at once.
 
+The gateway (`/g/{seller}/{path}`) and the facilitator's `verify` and `settle` also answer an unexpected failure with `500 internal_error` in this error body, logging the cause on the server. For the facilitator this is the one answer that is not an x402 response.
+
 An autopay gateway request (§2) returns the `/api/pay` errors above, plus these for `Idempotency-Key`:
 
 | Status | `code` | Meaning | Details |
@@ -208,13 +212,14 @@ An autopay gateway request (§2) returns the `/api/pay` errors above, plus these
 | `POST /api/invoices/generate` | Build and send an org's monthly PayPal invoice now |
 | `POST /api/paypal/webhook` | PayPal events (idempotent on resource id) |
 | `GET /api/stream/calls` | Server-sent events for live call feeds |
+| `POST /api/playground/run` | Signed-in buyer. Runs the playground agent with a per-run Key (revoked when the run ends). Body `{ "prompt": string }`, 1 to 500 characters. Response is `text/event-stream` of `data: <json>` frames whose `type` is one of `start` (`agent`, `budgetMicro`), `reasoning`, `answer`, `tool-call`, `tool-result` (`costMicro`, `ok`), `busy`, `error`, `notice` (`text`), `done` (`spentMicro`, `recommendation`); `done` is always last. Replay: when the model is busy before the run has made any progress (no paid call has settled or is in flight) and the same org ran the same prompt within 10 minutes, the route sends `{ "type": "notice", "text" }` saying so, then replays the earlier run's events (ending with its `done`); no new charges are made and the replay is not cached again. Errors, in the standard `{ "error": { "code", "message" } }` body (§4): `401 unauthenticated`, `400 invalid_request`, `409 no_agent`, and `500 internal_error` if the run can't start (its Key is revoked) |
 | `POST /api/demo/simulate` | Start or stop simulated traffic (demo mode only) |
 | `GET /api/demo/sellers/product-search/search?q=…` | Product Search sample API; queries Channel3 server-side and returns the fixed monitor fallback when unavailable or empty |
 | `GET /api/demo/sellers/price-history/history?product=…` | Price History sample API; returns 90 deterministic daily points for a product ID |
 | `POST /api/demo/sellers/review-summariser/summarise` | Review Summariser sample API (Priya Labs); Gemini summarises the reviews via `lib/llm` |
 | `POST /api/demo/sellers/cheap-reviews/summarise` | Cheap Reviews sample API (DataCorp); same request and response as Review Summariser, but a terser prompt that reads only the first 5 reviews |
 
-These are the upstreams the seeded listings point at (SEED_DATA.md §3); buyers reach them through `/g/{seller}/…`.
+These are the upstreams the seeded listings point at (SEED_DATA.md §3); buyers reach them through `/g/{seller}/…`. They answer only the gateway: each checks `X-Piko-Secret` against `DEMO_UPSTREAM_SECRET` (in constant time) before doing anything, and a request without it, or with a wrong value, gets `401 unauthorized` in the standard error body (§4), so nobody can spend the Gemini or Channel3 free tier by calling them directly. The gateway sends that secret only to upstream URLs under `${APP_BASE_URL}/api/demo/sellers/` (same scheme, host and port), never to another seller.
 
 Product Search returns `{ "products": [...], "source": "channel3" | "fallback" }`. Its Channel3 API key stays server-side. Price History returns `{ "productId": "…", "currency": "USD", "history": [{ "date": "YYYY-MM-DD", "priceMicroUsd": "…" }] }`; the fixed window and integer micro-USD values are deterministic for each product ID.
 

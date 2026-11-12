@@ -36,7 +36,9 @@ paths:
         A free Call (agent key, within the endpoint's free quota) and any call to an
         endpoint priced at 0 are proxied without a challenge. An upstream Location or
         Content-Location under the seller's base URL is rewritten to /g/{seller}/...,
-        and one elsewhere on the upstream's origin is dropped.
+        and one elsewhere on the upstream's origin is dropped. An upstream Set-Cookie is
+        dropped, and every proxied response carries X-Content-Type-Options: nosniff and
+        Content-Security-Policy: sandbox.
         Other HTTP methods behave the same way.
       security:
         - {}
@@ -119,6 +121,11 @@ paths:
         "423": { $ref: "#/components/responses/Error" }
         "429":
           description: With X-Piko-Autopay, the circuit breaker froze the agent (code breaker_tripped); nothing was forwarded or charged
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          description: Something unexpected failed (code internal_error); the cause is logged on the server
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -293,6 +300,13 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VerifyResponse" }
+        "500":
+          description: |
+            Something unexpected failed (code internal_error, the standard Error body, not an
+            x402 response); the cause is logged on the server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/facilitator/settle:
     post:
@@ -303,7 +317,7 @@ paths:
         Call only after the protected handler succeeded (x402 authorization flow).
         If settle is never called, the reservation is released when the receipt expires.
         Open to anyone holding the PaymentPayload; the receipt is the credential.
-        Every response, failures included, is an x402 SettlementResponse.
+        Every response, failures included, is an x402 SettlementResponse, except a 500.
       security: [{}]
       requestBody:
         required: true
@@ -328,6 +342,13 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Settlement" }
+        "500":
+          description: |
+            Something unexpected failed (code internal_error, the standard Error body, not an
+            x402 response); the cause is logged on the server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
 components:
   securitySchemes:

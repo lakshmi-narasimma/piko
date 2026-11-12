@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as cheapReviews } from "@/app/api/demo/sellers/cheap-reviews/summarise/route";
 import { POST as reviewSummariser } from "@/app/api/demo/sellers/review-summariser/summarise/route";
 import { createLlm, type Llm } from "@/lib/llm";
+import { stubGatewayEnv, TEST_DEMO_UPSTREAM_SECRET } from "@/test/gateway-fixtures";
 
 // The routes call getLlm(); swap in a real Llm over mock models so no provider is ever called.
 const current = vi.hoisted(() => ({ llm: undefined as Llm | undefined }));
@@ -54,10 +55,12 @@ function useModel(
   return model;
 }
 
-function post(body: unknown): Request {
+function post(body: unknown, secret: string | null = TEST_DEMO_UPSTREAM_SECRET): Request {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (secret !== null) headers["X-Piko-Secret"] = secret;
   return new Request("http://localhost/api/demo/sellers/review-summariser/summarise", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 }
@@ -69,16 +72,30 @@ function promptText(options: LanguageModelV4CallOptions | undefined): string {
 
 beforeEach(() => {
   current.llm = undefined;
+  stubGatewayEnv();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe.each([
   ["Review Summariser", reviewSummariser],
   ["Cheap Reviews", cheapReviews],
 ])("%s route", (_name, route) => {
+  it.each([
+    ["no X-Piko-Secret", null],
+    ["a wrong X-Piko-Secret", "not-the-secret"],
+  ])("answers 401 for %s without calling the model", async (_case, secret) => {
+    const model = useModel(async () => reply(JSON.stringify(SUMMARY)));
+    const response = await route(post({ reviews: ["Great."] }, secret));
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe("unauthorized");
+    expect(model.doGenerateCalls).toHaveLength(0);
+  });
+
   it.each([
     ["not JSON", "{nope"],
     ["missing reviews", { product: "Monitor" }],

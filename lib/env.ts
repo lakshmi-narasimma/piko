@@ -12,6 +12,13 @@ import { z } from "zod";
 const required = z.string().min(1);
 const positiveInt = z.coerce.number().int().positive();
 
+// Signing keys and shared secrets: long enough to resist guessing, and never the
+// .env.example placeholder. Generate one with `openssl rand -base64 48`.
+const strongSecret = z
+  .string()
+  .min(32, "must be at least 32 characters (generate one with `openssl rand -base64 48`)")
+  .refine((value) => value !== "change-me", "must not be the .env.example placeholder");
+
 // Decision 0011: aliases such as gemini-flash-latest hot-swap without notice, so only
 // pinned ids are accepted.
 const pinnedModelId = z
@@ -35,8 +42,11 @@ const envSchema = z.object({
 
   // App
   APP_BASE_URL: z.url(),
-  SESSION_SECRET: required,
-  RECEIPT_SIGNING_SECRET: required,
+  SESSION_SECRET: strongSecret,
+  RECEIPT_SIGNING_SECRET: strongSecret,
+  // Sent by the gateway as X-Piko-Secret to the sample seller APIs under /api/demo/sellers,
+  // which refuse any request without it.
+  DEMO_UPSTREAM_SECRET: strongSecret,
   DEMO_MODE: z.stringbool().default(false),
 
   // Database (Neon). The app uses the pooled URL; migrations use the direct one.

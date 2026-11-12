@@ -8,12 +8,16 @@ import { agents, endpoints, ledgerEntries, listings, orgs } from "../lib/db/sche
 import type { GatewayConfig } from "../lib/gateway";
 import { createKey } from "../lib/keys";
 
+/** What the gateway sends the sample seller APIs as X-Piko-Secret in tests. */
+export const TEST_DEMO_UPSTREAM_SECRET = "test-demo-upstream-secret-0123456789";
+
 /** Variables getEnv validates. The Ledger reads PLATFORM_FEE_BPS through it. */
 export function stubGatewayEnv(): void {
   const env: Record<string, string> = {
     APP_BASE_URL: "https://piko.test",
-    SESSION_SECRET: "test",
-    RECEIPT_SIGNING_SECRET: "test-receipt-secret",
+    SESSION_SECRET: "test-session-secret-0123456789abcdef",
+    RECEIPT_SIGNING_SECRET: TEST_GATEWAY_CONFIG.receiptSigningSecret,
+    DEMO_UPSTREAM_SECRET: TEST_DEMO_UPSTREAM_SECRET,
     DATABASE_URL: "postgresql://unused@localhost/unused",
     DATABASE_URL_POOLED: "postgresql://unused@localhost/unused",
     PAYPAL_CLIENT_ID: "test",
@@ -31,8 +35,9 @@ export const TEST_GATEWAY_CONFIG: GatewayConfig = {
   network: "paypal:sandbox",
   challengeTtlSeconds: 30,
   receiptTtlSeconds: 60,
-  receiptSigningSecret: "test-receipt-secret",
+  receiptSigningSecret: "test-receipt-secret-0123456789abcdef",
   upstreamTimeoutMs: 2_000,
+  demoUpstreamSecret: TEST_DEMO_UPSTREAM_SECRET,
 };
 
 export interface RecordedRequest {

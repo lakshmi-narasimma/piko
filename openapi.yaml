@@ -118,6 +118,13 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "410": { $ref: "#/components/responses/Error" }
+        "413":
+          description: |
+            The request body is over GATEWAY_MAX_BODY_BYTES (code payload_too_large, detail
+            maxBytes), counted as it streams; nothing was forwarded or charged and any hold was released
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "423": { $ref: "#/components/responses/Error" }
         "429":
           description: With X-Piko-Autopay, the circuit breaker froze the agent (code breaker_tripped); nothing was forwarded or charged
@@ -131,9 +138,11 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "502":
           description: |
-            The upstream answered 5xx, timed out, or its URL was refused by the SSRF re-check (code upstream_failed); nothing was charged.
-            For a paid Call, details refunded true and callId (the Call, recorded with status
-            refunded and no Ledger entries). For a free or $0 Call, refunded false and no callId.
+            Upstream failed (code upstream_failed); nothing was charged. Details refunded and
+            reason: unreachable (DNS, connection or TLS failure, or a URL refused by the SSRF
+            re-check), timeout, server_error (a 5xx) or response_too_large (over GATEWAY_MAX_RESPONSE_BYTES).
+            For a paid Call, refunded true and callId (the Call, recorded with status refunded
+            and no Ledger entries). For a free or $0 Call, refunded false and no callId.
           headers:
             PAYMENT-RESPONSE:
               schema: { type: string }
@@ -551,6 +560,6 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, challenge_buyer_mismatch, upstream_failed, not_found, invalid_request, invalid_amount, invalid_receipt, request_timeout, internal_error]
+              enum: [invalid_key, agent_frozen, breaker_tripped, policy_denied, approval_pending, budget_exceeded, insufficient_funds, challenge_expired, challenge_buyer_mismatch, upstream_failed, not_found, invalid_request, invalid_amount, invalid_receipt, request_timeout, payload_too_large, internal_error]
             message: { type: string }
           additionalProperties: true

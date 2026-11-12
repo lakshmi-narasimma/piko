@@ -400,7 +400,7 @@ Covers TEST_PLAN **F12**, **F13** and the [SUBMISSION.md](SUBMISSION.md) checkli
   - **Left out on purpose:** (1) The "anything over 5 cents a call needs my OK" half of Acme's first policy: it is an `approval_above` rule, approvals (P5-04) aren't built, and on main a matching `approval_above` denies the Call. Only its $50/month search budget is seeded; add the rule when P5-04 lands. (2) Acme at **$183** this month: 12,000 Calls at these prices can't reach it, so Acme's month-to-date is whatever the history adds up to. (3) History covers the 29 UTC days before today, so timestamps are anchored to midnight and two runs on the same day are identical; a Call from "today" isn't seeded. (4) No `breaker` freeze is left in place (the demo trips it live): only the alert from 9 days ago. (5) Seller history already "paid out" is simulated: a `seed` Ledger entry pins Priya at $0.94 and DataCorp at $12.40, and no fake PayPal Payout row exists.
   - **Depends on:** Phases 1–7
 
-- [ ] **P9-02 Live simulated traffic** · `core` `ui` · S
+- [x] **P9-02 Live simulated traffic** · `core` `ui` · S
   - **Goal:** `POST /api/demo/simulate` turns on 1–3 synthetic calls a second, with a start and stop toggle. Every simulated item in the UI carries a "simulated" label.
   - **Done when:** Every F12 item passes.
   - **Depends on:** P9-01

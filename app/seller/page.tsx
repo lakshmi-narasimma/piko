@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { logout } from "@/app/login/actions";
+import { CallFeed } from "@/components/call-feed";
 import { requirePrincipal } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getEnv } from "@/lib/env";
@@ -54,6 +55,8 @@ async function SellerConsoleContent() {
           What buyers&rsquo; Calls have paid {org.name}, after the platform fee and less Payouts.
         </p>
       </section>
+
+      <CallFeed side="seller" />
 
       <section className="flex flex-col gap-4">
         <h2 className="text-xl font-medium">Listings</h2>

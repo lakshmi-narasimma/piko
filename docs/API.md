@@ -242,8 +242,6 @@ The URL is `https://<app>/mcp/<seller>`, for example `http://localhost:3000/mcp/
 | `POST /api/listings` | Create a Listing from a base URL, with its Endpoints and prices (see below). The pricing assistant reads the OpenAPI/docs text |
 | `POST /api/listings/{id}/suggest-pricing` | Gemini pricing assistant |
 | `CRUD /api/endpoints`, `/api/rate-overrides` | Prices and enterprise rates |
-
-The Seller console (`/seller`) changes an Endpoint's price and free allowance through a server action (`saveEndpoint` in `app/seller/actions.ts`, logic in `updateEndpoint` in `lib/listings`), not an HTTP route. Only a seller org's admin may use it, and only on their own org's Endpoints (the org comes from the session). The price is dollars as typed ("0.005", read with `parseUsd`), $0 to $100 per Call as for a new Listing; the free allowance is 0 to 1,000,000. The gateway reads both when each request arrives, so the next 402 carries the new amount at once; a Challenge already issued keeps the amount it was issued for.
 | `POST /api/payouts/withdraw` | Manual seller payout |
 | `POST /api/invoices/generate` | Build and send an org's monthly PayPal invoice now |
 | `POST /api/paypal/webhook` | PayPal events (idempotent on resource id) |
@@ -255,6 +253,8 @@ The Seller console (`/seller`) changes an Endpoint's price and free allowance th
 | `GET /api/demo/sellers/price-history/history?product=…` | Price History sample API; returns 90 deterministic daily points for a product ID |
 | `POST /api/demo/sellers/review-summariser/summarise` | Review Summariser sample API (Priya Labs); Gemini summarises the reviews via `lib/llm` |
 | `POST /api/demo/sellers/cheap-reviews/summarise` | Cheap Reviews sample API (DataCorp); same request and response as Review Summariser, but a terser prompt that reads only the first 5 reviews |
+
+The Seller console (`/seller`) changes an Endpoint's price and free allowance through a server action (`saveEndpoint` in `app/seller/actions.ts`, logic in `updateEndpoint` in `lib/listings`), not an HTTP route. Only a seller org's admin may use it, and only on their own org's Endpoints (the org comes from the session). The price is dollars as typed ("0.005", read with `parseUsd`), $0 to $100 per Call as for a new Listing; the free allowance is 0 to 1,000,000. The gateway reads both when each request arrives, so the next 402 carries the new amount at once; a Challenge already issued keeps the amount it was issued for.
 
 These are the upstreams the seeded listings point at (SEED_DATA.md §3); buyers reach them through `/g/{seller}/…`. They answer only the gateway: each checks `X-Piko-Secret` against `DEMO_UPSTREAM_SECRET` (in constant time) before doing anything, and a request without it, or with a wrong value, gets `401 unauthorized` in the standard error body (§4), so nobody can spend the Gemini or Channel3 free tier by calling them directly. The gateway sends that secret only to upstream URLs under `${APP_BASE_URL}/api/demo/sellers/` (same scheme, host and port), never to another seller.
 

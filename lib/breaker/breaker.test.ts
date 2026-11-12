@@ -137,7 +137,8 @@ describe.skipIf(!url)("circuit breaker in POST /api/pay", () => {
     expect(next.status).toBe(423);
     expect(await errorOf(next)).toMatchObject({ code: "agent_frozen", scope: "agent" });
     expect(await alertsOf(buyer.agentId)).toHaveLength(1);
-  });
+    // 50+ requests; the full suite seeds 12,000 spend Calls in parallel, which can pass 5 s.
+  }, 30_000);
 
   it("lets an agent pay up to the call limit", async () => {
     const buyer = await createBuyer(db, 1_000_000n);

@@ -188,13 +188,52 @@ describe.skipIf(!url)("spend grid rows", () => {
     const before = await loadSpendRows(db, acme, { from: "2000-01-01", to: "2000-01-31" });
     expect(before.rows).toEqual([]);
 
-    const lastWeek = spendRange({
-      from: new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10),
-    });
+    const now = new Date();
+    const lastWeek = spendRange(
+      { from: new Date(now.getTime() - 6 * 86_400_000).toISOString().slice(0, 10) },
+      now,
+    );
     const recent = await loadSpendRows(db, acme, lastWeek);
     expect(recent.rows.length).toBeGreaterThan(0);
     expect(recent.rows.length).toBeLessThan(12_000);
     expect(recent.rows.every((row) => row.day >= lastWeek.from)).toBe(true);
+  });
+
+  it("includes the last millisecond of the to day and excludes the next day, UTC", async () => {
+    const [org] = await db
+      .insert(orgs)
+      .values({
+        name: "Edges",
+        slug: `edges-${randomUUID()}`,
+        kind: "company",
+        billing: "invoiced",
+      })
+      .returning({ id: orgs.id });
+    const edges: Actor = { org: { id: org!.id }, role: "admin" };
+    const [agent] = await db
+      .insert(agents)
+      .values({ orgId: org!.id, name: "edge-bot" })
+      .returning({ id: agents.id });
+    const at = (iso: string) => ({
+      agentId: agent!.id,
+      buyerOrgId: org!.id,
+      endpointId: seller.endpointId,
+      amountMicro: 0n,
+      status: "free" as const,
+      createdAt: new Date(iso),
+    });
+    const inserted = await db
+      .insert(calls)
+      .values([
+        at("2026-03-01T00:00:00.000Z"),
+        at("2026-03-05T23:59:59.999Z"),
+        at("2026-03-06T00:00:00.000Z"),
+        at("2026-02-28T23:59:59.999Z"),
+      ])
+      .returning({ id: calls.id });
+
+    const { rows } = await loadSpendRows(db, edges, { from: "2026-03-01", to: "2026-03-05" });
+    expect(rows.map((row) => row.callId)).toEqual([inserted[1]!.id, inserted[0]!.id]);
   });
 
   it("caps the rows and says so", async () => {

@@ -24,6 +24,7 @@ import {
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { csvSafe } from "@/lib/csv";
 import { formatUsd, toUsdDecimal } from "@/lib/money";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -273,7 +274,8 @@ export function SpendGrid({
         const id = p.column.getColId();
         if (MONEY_COLUMNS.has(id)) return typeof p.value === "bigint" ? toUsdDecimal(p.value) : "";
         if (id === "simulated") return p.value ? "true" : "false";
-        return p.value == null ? "" : String(p.value);
+        // Names and ids come from other people; keep a spreadsheet from running them.
+        return p.value == null ? "" : csvSafe(String(p.value));
       },
     });
   };
@@ -308,6 +310,9 @@ export function SpendGrid({
             Download CSV
           </button>
         </div>
+        <p className="w-full text-xs text-muted">
+          The totals and the CSV cover the newest 50,000 rows in the range.
+        </p>
       </div>
       <div className="h-[640px] w-full">
         <AgGridReact

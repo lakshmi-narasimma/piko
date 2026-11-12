@@ -38,14 +38,24 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  const ctx = createToolContext({
-    db,
-    llm: getLlm(),
-    key: run.key,
-    orgId: principal.org.id,
-    baseUrl: getEnv().APP_BASE_URL,
-    taskBudgetMicro: run.taskBudgetMicro,
-  });
+  // From here the run holds a live Key, so any failure before the stream starts revokes it.
+  let ctx;
+  let llm;
+  try {
+    llm = getLlm();
+    ctx = createToolContext({
+      db,
+      llm,
+      key: run.key,
+      orgId: principal.org.id,
+      baseUrl: getEnv().APP_BASE_URL,
+      taskBudgetMicro: run.taskBudgetMicro,
+    });
+  } catch (error) {
+    console.error("playground run failed to start", error);
+    await revokeQuietly(db, run);
+    return jsonError(500, "internal_error", "The agent couldn't start. Try again.");
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -66,7 +76,7 @@ export async function POST(request: Request) {
       const events: AgentEvent[] = [];
       try {
         for await (const event of runAgent({
-          llm: getLlm(),
+          llm,
           ctx,
           prompt,
           abortSignal: request.signal,
@@ -89,7 +99,7 @@ export async function POST(request: Request) {
         }
         if (isCacheable(events)) cache.set(principal.org.id, prompt, events);
       } finally {
-        await finishPlaygroundRun(db, run).catch(() => {});
+        await revokeQuietly(db, run);
         try {
           controller.close();
         } catch {
@@ -106,4 +116,13 @@ export async function POST(request: Request) {
       Connection: "keep-alive",
     },
   });
+}
+
+/** Revokes the run's Key. A failure here is logged, never thrown into the stream. */
+async function revokeQuietly(db: ReturnType<typeof getDb>, run: { keyId: string }) {
+  try {
+    await finishPlaygroundRun(db, run);
+  } catch (error) {
+    console.error(`playground run: couldn't revoke Key ${run.keyId}`, error);
+  }
 }

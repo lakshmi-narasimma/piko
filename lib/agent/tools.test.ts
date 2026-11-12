@@ -6,7 +6,7 @@ function context(overrides: Partial<AgentToolContext> = {}): AgentToolContext {
     key: "pk_agent_secret",
     baseUrl: "http://localhost:3000",
     taskBudgetMicro: 100_000n,
-    state: { spentMicro: 0n },
+    state: { spentMicro: 0n, reservedMicro: 0n },
     search: vi.fn(async () => []),
     lookupPrice: vi.fn(async () => 2_000n),
     walletBalance: vi.fn(async () => 5_000_000n),
@@ -56,7 +56,10 @@ describe("call_api", () => {
   });
 
   it("refuses a call that would cross the task budget, without calling or charging", async () => {
-    const ctx = context({ taskBudgetMicro: 3_000n, state: { spentMicro: 2_000n } });
+    const ctx = context({
+      taskBudgetMicro: 3_000n,
+      state: { spentMicro: 2_000n, reservedMicro: 0n },
+    });
     const result = await run<Record<string, unknown>>(createAgentTools(ctx).call_api, {
       seller: "priya",
       path: "/history",
@@ -65,6 +68,48 @@ describe("call_api", () => {
     expect(result).toMatchObject({ ok: false, error: "over_task_budget", costMicro: "0" });
     expect(ctx.send).not.toHaveBeenCalled();
     expect(ctx.state.spentMicro).toBe(2_000n);
+  });
+
+  it("holds the task budget under parallel calls from one model step", async () => {
+    const ctx = context({ taskBudgetMicro: 3_000n, lookupPrice: vi.fn(async () => 2_000n) });
+    const tools = createAgentTools(ctx);
+    const input = { seller: "priya", path: "/history", method: "GET" };
+    const results = await Promise.all([
+      run<Record<string, unknown>>(tools.call_api, input),
+      run<Record<string, unknown>>(tools.call_api, input),
+    ]);
+
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    expect(results.filter((r) => r.ok === true)).toHaveLength(1);
+    expect(results.filter((r) => r.error === "over_task_budget")).toHaveLength(1);
+    expect(ctx.state.spentMicro).toBe(2_000n);
+    expect(ctx.state.reservedMicro).toBe(0n);
+  });
+
+  it("releases the reservation when the send throws", async () => {
+    const ctx = context({
+      send: vi.fn(async () => {
+        throw new Error("network");
+      }),
+    });
+    await expect(
+      run(createAgentTools(ctx).call_api, { seller: "priya", path: "/history", method: "GET" }),
+    ).rejects.toThrow("network");
+    expect(ctx.state.reservedMicro).toBe(0n);
+    expect(ctx.state.spentMicro).toBe(0n);
+  });
+
+  it("drops a body on a GET", async () => {
+    const ctx = context();
+    await run(createAgentTools(ctx).call_api, {
+      seller: "priya",
+      path: "/history",
+      method: "GET",
+      body: { a: 1 },
+    });
+    const [request] = vi.mocked(ctx.send).mock.calls[0]!;
+    expect(request.method).toBe("GET");
+    expect(request.headers.get("content-type")).toBeNull();
   });
 
   it("says so for an endpoint that doesn't exist", async () => {
@@ -129,12 +174,28 @@ describe("call_api", () => {
 
 describe("check_budget", () => {
   it("reports what is left", async () => {
-    const ctx = context({ taskBudgetMicro: 100_000n, state: { spentMicro: 30_000n } });
+    const ctx = context({
+      taskBudgetMicro: 100_000n,
+      state: { spentMicro: 30_000n, reservedMicro: 0n },
+    });
     expect(await run(createAgentTools(ctx).check_budget, {})).toMatchObject({
       spentMicro: "30000",
       remainingMicro: "70000",
       remaining: "$0.07",
       walletBalance: "$5.00",
+    });
+  });
+});
+
+describe("check_budget while a call is in flight", () => {
+  it("counts reserved money as spent", async () => {
+    const ctx = context({
+      taskBudgetMicro: 100_000n,
+      state: { spentMicro: 30_000n, reservedMicro: 20_000n },
+    });
+    expect(await run(createAgentTools(ctx).check_budget, {})).toMatchObject({
+      spentMicro: "50000",
+      remainingMicro: "50000",
     });
   });
 });

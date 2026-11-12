@@ -23,7 +23,7 @@ interface SentBatch {
 function fakePayPal(
   answer: { status: number; body: unknown } | "network-error" = {
     status: 201,
-    body: { batch_header: { payout_batch_id: "BATCH-1", batch_status: "PENDING" } },
+    body: { batch_header: { payout_batch_id: `BATCH-${randomUUID()}`, batch_status: "PENDING" } },
   },
 ) {
   const sent: SentBatch[] = [];
@@ -100,7 +100,7 @@ describe.skipIf(!url)("Payouts", () => {
     expect(payout).toMatchObject({
       amountMicro: 1_230_000n,
       status: "pending",
-      paypalBatchId: "BATCH-1",
+      paypalBatchId: expect.stringMatching(/^BATCH-/),
     });
     expect(sent).toHaveLength(1);
     expect(sent[0]!.requestId).toBe(payout.id);
@@ -122,7 +122,7 @@ describe.skipIf(!url)("Payouts", () => {
       }),
     ]);
     const [row] = await db.select().from(payouts).where(eq(payouts.id, payout.id));
-    expect(row).toMatchObject({ status: "pending", paypalBatchId: "BATCH-1" });
+    expect(row).toMatchObject({ status: "pending", paypalBatchId: expect.stringMatching(/^BATCH-/) });
   });
 
   it("pays out on its own when a settle takes Priya from $0.94 past $1.00", async () => {
@@ -146,7 +146,7 @@ describe.skipIf(!url)("Payouts", () => {
 
     const payout = await maybeAutoPayout({ db, paypal, thresholdMicro: THRESHOLD }, orgId);
     const wholeCents = (balance / 10_000n) * 10_000n;
-    expect(payout).toMatchObject({ amountMicro: wholeCents, paypalBatchId: "BATCH-1" });
+    expect(payout).toMatchObject({ amountMicro: wholeCents, paypalBatchId: expect.stringMatching(/^BATCH-/) });
     expect(sent).toHaveLength(1);
     expect(await sellerBalance(orgId)).toBe(balance - wholeCents);
 

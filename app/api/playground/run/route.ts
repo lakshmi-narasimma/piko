@@ -1,5 +1,6 @@
 import { getPrincipal } from "@/lib/auth";
-import { runAgent } from "@/lib/agent/run";
+import { getRunCache, isCacheable, shouldReplay } from "@/lib/agent/cache";
+import { runAgent, type AgentEvent } from "@/lib/agent/run";
 import { finishPlaygroundRun, NoAgentError, startPlaygroundRun } from "@/lib/agent/playground";
 import { createToolContext } from "@/lib/agent/tools";
 import { getDb } from "@/lib/db";
@@ -71,6 +72,8 @@ export async function POST(request: Request) {
         agent: run.agentName,
         budgetMicro: run.taskBudgetMicro.toString(),
       });
+      const cache = getRunCache();
+      const events: AgentEvent[] = [];
       try {
         for await (const event of runAgent({
           llm,
@@ -78,8 +81,24 @@ export async function POST(request: Request) {
           prompt,
           abortSignal: request.signal,
         })) {
+          // Replay only while no paid call has settled or is in flight (see shouldReplay).
+          const earlier = shouldReplay(event, ctx.state)
+            ? cache.get(principal.org.id, prompt)
+            : null;
+          if (earlier) {
+            // The model is busy and this buyer already ran this prompt: show that run, and say so.
+            send({
+              type: "notice",
+              text: "The AI is busy right now, so this is a replay of your recent run. No new charges were made.",
+            });
+            for (const past of earlier) send(past);
+            events.length = 0;
+            break;
+          }
+          events.push(event);
           send(event);
         }
+        if (isCacheable(events)) cache.set(principal.org.id, prompt, events);
       } finally {
         await revokeQuietly(db, run);
         try {

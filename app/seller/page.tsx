@@ -7,7 +7,9 @@ import { getEnv } from "@/lib/env";
 import { balanceOf } from "@/lib/ledger";
 import { sellerListings } from "@/lib/listings";
 import { formatUsd } from "@/lib/money";
+import { listPayouts } from "@/lib/payouts";
 import { EndpointRow } from "./endpoint-row";
+import { WithdrawButton } from "./withdraw-button";
 
 export const metadata = { title: "Seller console · Piko" };
 
@@ -17,10 +19,12 @@ const button = "rounded-md border border-line px-3 py-2 text-sm hover:bg-surface
 async function SellerConsoleContent() {
   const { account, org, role } = await requirePrincipal("seller");
   const db = getDb();
-  const [earnings, listings] = await Promise.all([
+  const [earnings, listings, payouts] = await Promise.all([
     balanceOf(db, { type: "seller", orgId: org.id }),
     sellerListings(db, { orgId: org.id, slug: org.slug }, getEnv().APP_BASE_URL),
+    listPayouts(db, org.id),
   ]);
+  const withdrawable = (earnings / 10_000n) * 10_000n;
   const canEdit = role === "admin";
 
   return (
@@ -51,8 +55,30 @@ async function SellerConsoleContent() {
         <h2 className="text-sm text-muted">Earnings balance</h2>
         <p className="text-3xl font-semibold tabular-nums">{formatUsd(earnings)}</p>
         <p className="text-sm text-muted">
-          What buyers&rsquo; Calls have paid {org.name}, after the platform fee and less Payouts.
+          What buyers&rsquo; Calls have paid {org.name}, after the platform fee and less Payouts. It
+          is paid out to PayPal automatically at {formatUsd(getEnv().PAYOUT_THRESHOLD_MICRO)}.
         </p>
+        {canEdit && (
+          <div className="pt-2">
+            <WithdrawButton
+              disabled={withdrawable <= 0n}
+              label={`Withdraw ${formatUsd(withdrawable)} to PayPal`}
+            />
+          </div>
+        )}
+        {payouts.length > 0 && (
+          <ul aria-label="Payouts" className="mt-3 flex flex-col gap-1 text-sm">
+            {payouts.map((p) => (
+              <li key={p.id} className="flex flex-wrap gap-2 tabular-nums">
+                <span>{formatUsd(p.amountMicro)}</span>
+                <span className="text-muted">
+                  {p.status} · {p.createdAt.toLocaleString()}
+                  {p.paypalBatchId && <> · batch {p.paypalBatchId}</>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="flex flex-col gap-4">

@@ -11,6 +11,7 @@ import type { Db } from "../db/client";
 import { calls } from "../db/schema";
 import { LedgerError, releaseReservation, settleCall } from "../ledger";
 import { loadChallenge, type PayableChallenge } from "../pay";
+import { maybeAutoPayout } from "../payouts";
 import {
   buildRequirements,
   X402_VERSION,
@@ -121,9 +122,11 @@ export async function settlePayment(
   outcome: { upstreamStatus?: number; latencyMs?: number } = {},
 ): Promise<SettlementResult> {
   const callId = randomUUID();
+  let sellerOrgId: string;
   try {
     await db.transaction(async (tx) => {
       const settled = await settleCall(tx, { nonce: claims.nonce, callId });
+      sellerOrgId = settled.sellerOrgId;
       await tx.insert(calls).values({
         id: callId,
         nonce: claims.nonce,
@@ -145,6 +148,10 @@ export async function settlePayment(
     }
     throw error;
   }
+
+  // P6-03: once this Call takes the seller to the payout threshold, pay them out. It never
+  // throws, and does nothing for most settles (a cheap balance read).
+  await maybeAutoPayout({ db }, sellerOrgId!);
 
   return {
     ok: true,

@@ -254,7 +254,7 @@ The URL is `https://<app>/mcp/<seller>`, for example `http://localhost:3000/mcp/
 | `POST /api/listings` | Create a Listing from a base URL, with its Endpoints and prices (see below). The pricing assistant reads the OpenAPI/docs text |
 | `POST /api/listings/{id}/suggest-pricing` | Gemini pricing assistant |
 | `CRUD /api/endpoints`, `/api/rate-overrides` | Prices and enterprise rates |
-| `POST /api/payouts/withdraw` | Manual seller payout |
+| Seller console server action (`withdrawAction`) | The **Withdraw** button: a PayPal Payouts batch with one item, the whole-cent seller balance to the org's `paypal_email`. Admins only. The same payout runs automatically after a settle takes the balance to `PAYOUT_THRESHOLD_MICRO`. A pending `payout` Ledger debit is written before PayPal is called; the payout id is the `sender_batch_id` and `PayPal-Request-Id`, so a retry never pays twice. A PayPal 4xx reverses it (`payout_reversal`); an unknown outcome stays pending for the payout webhooks |
 | `POST /api/invoices/generate` | Build and send an org's monthly PayPal invoice now |
 | `POST /api/paypal/webhook` | PayPal events (idempotent on resource id) |
 | `GET /api/stream/calls` | Server-sent events for live call feeds |

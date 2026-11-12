@@ -274,7 +274,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** The F5 agent-budget and team-budget items pass.
   - **Depends on:** P1-09
 
-- [ ] **P5-03 Policy schema and evaluator** · `core` · M
+- [x] **P5-03 Policy schema and evaluator** · `core` · M
   - **Goal:** A zod schema for policies ([DESIGN.md §9](DESIGN.md#9-policy-engine-budgets-and-circuit-breaker)) and a deterministic evaluator in `lib/policy`: vendor block and allow, max price per call, and approval above an amount. A denial returns 403 `policy_denied` naming the policy. Checks run in the order §9 gives.
   - **Done when:** The F5 vendor-block item passes, and unit tests cover each rule type.
   - **Depends on:** P5-02

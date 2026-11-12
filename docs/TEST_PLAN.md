@@ -39,8 +39,8 @@ Tag key: **[auto]** automated test · **[sandbox]** manual check against real Pa
 - [ ] Team budget: Marketing at its $50 cap blocks `campaign-researcher` even though Acme's org budget has room.
 - [ ] Vendor block: any Acme agent calling Cheap Reviews → 403 `policy_denied`, naming the policy.
 - [ ] Approval: a Marketing call over $0.05 → 202 `approval_pending`. Approving it in the Org console lets the agent's poll return a receipt. Denying it returns `denied`.
-- [ ] Policy compiler: typing *"Support agents can spend at most $10 a day"* produces a valid budget rule scoped to Support. It isn't enforced until **Confirm** is clicked.
-- [ ] Policy compiler, bad input (*"make it cheaper somehow"*): returns a clear "couldn't turn this into a rule" message and saves nothing.
+- [x] Policy compiler: typing *"Support agents can spend at most $10 a day"* produces a valid budget rule scoped to Support. It isn't enforced until **Confirm** is clicked.
+- [x] Policy compiler, bad input (*"make it cheaper somehow"*): returns a clear "couldn't turn this into a rule" message and saves nothing.
 
 ## F6. Circuit breaker and kill switch [auto + ui]
 - [ ] `loop-bot` making more than 50 calls in 10 s → 429 `breaker_tripped`, the agent is frozen, and an alert appears in the Org console.

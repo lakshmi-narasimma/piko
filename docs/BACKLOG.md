@@ -284,7 +284,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** The F5 approval item passes for both approve and deny.
   - **Depends on:** P5-03, P5-01
 
-- [ ] **P5-05 Policy compiler** · `ai` `ui` · M
+- [x] **P5-05 Policy compiler** · `ai` `ui` · M
   - **Goal:** The admin types plain English. Gemini returns structured output, which is checked against the P5-03 schema and shown as a readable rule. Nothing is enforced until **Confirm** is clicked, and input that can't become a rule gets a clear message.
   - **Done when:** Both F5 compiler items pass.
   - **Depends on:** P5-03, P1-05

@@ -10,8 +10,6 @@ AI agents can already pay for APIs with Stripe or crypto. Piko brings them to Pa
 
 Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/).
 
-> 🚧 **Work in progress.** Links and setup steps below get filled in as the build lands.
-
 ---
 
 ## Try it
@@ -22,8 +20,8 @@ Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/).
 | Persona | What to try |
 |---|---|
 | **Sam** (solo dev) | Top up with PayPal, then ask the agent playground to find a monitor |
-| **Dana** (Acme admin) | Write a spending policy in plain English, approve a request, freeze a runaway agent, generate the monthly invoice |
-| **Priya** (indie seller) | Watch earnings arrive live and trigger a PayPal payout |
+| **Dana** (Acme admin) | See spend by team and agent, export the audit CSV, watch the circuit breaker trip a runaway agent, freeze an agent, a team or the whole org |
+| **Priya** (indie seller) | See earnings, change an Endpoint's price and watch the next 402 carry it, connect a new API |
 
 **PayPal sandbox logins** for the checkout popups (test accounts, no real money):
 
@@ -41,8 +39,7 @@ Agent ──request + receipt──▶ Piko gateway ──▶ seller API ──d
 - Per-call amounts are fractions of a cent, smaller than PayPal's per-transaction fee, so Piko keeps an exact **ledger** in the middle.
 - **PayPal moves the real money at the edges:**
   - top-ups through **Orders v2** and the **JS SDK**
-  - company bills through **Invoicing**
-  - seller earnings through **Payouts**
+  - the end-of-demo product checkout through **Orders v2**
   - every event confirmed by **Webhooks**
 - The protocol follows **x402** (HTTP 402 → pay → retry with a receipt), with a new `paypal-ledger` payment scheme. Piko acts as its facilitator.
 
@@ -51,8 +48,7 @@ More detail: [docs/DESIGN.md](docs/DESIGN.md) · API: [docs/API.md](docs/API.md)
 ## AI tools used
 | Tool | How it's used |
 |---|---|
-| **Google Gemini** (free tier) | The budget-aware shopping agent in the playground. Turning plain-English policies into enforceable rules. Suggesting prices from a seller's API docs. Embeddings for directory search. |
-| **PayPal Agent Toolkit** | Gives the playground agent PayPal actions (checkout, invoicing) |
+| **Google Gemini** (free tier), with **Groq** as a fallback | The budget-aware shopping agent in the playground. Embeddings for directory search. |
 
 ## Sponsor tools
 | Tool | Use |
@@ -76,7 +72,7 @@ More detail: [docs/DESIGN.md](docs/DESIGN.md) · API: [docs/API.md](docs/API.md)
    npm run dev          # http://localhost:3000
    ```
 5. Open http://localhost:3000.
-6. Make a paid Call through the x402 loop. PayPal top-ups aren't built yet, so seed Sam's wallet first, and put the Key the seed prints in `PIKO_AGENT_KEY`:
+6. Make a paid Call through the x402 loop. Seed Sam's wallet first (the app tops up through PayPal, but this skips the popup), and put the Key the seed prints in `PIKO_AGENT_KEY`:
    ```sh
    npm run seed -- --sam-wallet-micro=5000000   # $5.00, for local runs only
    PIKO_AGENT_KEY=pk_agent_... npm run agent    # 402, then pay, then the paid retry
@@ -97,8 +93,8 @@ npm run build       # production build
 
 ## Honesty notes
 - All payments use the **PayPal sandbox**: no real money.
-- Dashboard history and background traffic are **simulated** and labelled as such in the app. Every flow that moves money (top-ups, payouts, invoices, checkout) is real sandbox activity.
+- Dashboard history and background traffic are **simulated** and labelled as such in the app. Every flow that moves money (top-ups and checkout) is real sandbox activity.
 - In production, holding prepaid balances would run on PayPal's multiparty setup with PayPal holding the funds.
 
 ## License
-MIT. See [LICENSE](LICENSE). *(Added when the repo goes public.)*
+MIT. See [LICENSE](LICENSE).

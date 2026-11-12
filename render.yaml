@@ -1,0 +1,48 @@
+# Render blueprint for the Piko web service. Every secret is `sync: false`: Render asks for the
+# value in the dashboard and nothing sensitive is stored in this file. See docs/DEPLOY.md.
+services:
+  - type: web
+    name: piko
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: DEMO_MODE
+        value: "true"
+      # Set these in the Render dashboard. APP_BASE_URL is the service's own https URL.
+      - key: APP_BASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: RECEIPT_SIGNING_SECRET
+        sync: false
+      - key: DEMO_UPSTREAM_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_POOLED
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      # Inlined into the browser bundle by `next build`: set it before the first build.
+      - key: NEXT_PUBLIC_PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_DEMO_SHOP_EMAIL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: CHANNEL3_API_KEY
+        sync: false

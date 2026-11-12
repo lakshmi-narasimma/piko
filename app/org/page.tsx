@@ -6,7 +6,9 @@ import { getDb } from "@/lib/db";
 import { formatUsd } from "@/lib/money";
 import { loadOrgTree, type Spend, type TreeAgent, type TreeBudget } from "@/lib/org";
 import { isOrgFrozen } from "@/lib/org/freeze";
+import { listPolicies } from "@/lib/policy/list";
 import { FreezeButton, FrozenBadge, OrgFreezeSwitch } from "./freeze-controls";
+import { PolicyCompiler } from "./policy-compiler";
 import { CreateAgentForm, CreateTeamForm, MoveAgentForm, type TeamOption } from "./tree-forms";
 
 export const metadata = { title: "Org console · Piko" };
@@ -83,11 +85,12 @@ function AgentRow({
 // Reads the session cookie and the database, so it renders at request time inside Suspense.
 async function OrgConsoleContent() {
   const { org, role } = await requirePrincipal("org");
-  const [tree, orgFrozen] = await Promise.all([
+  const canEdit = role === "admin";
+  const [tree, orgFrozen, savedPolicies] = await Promise.all([
     loadOrgTree(getDb(), org.id),
     isOrgFrozen(getDb(), org.id),
+    canEdit ? listPolicies(getDb(), org.id) : [],
   ]);
-  const canEdit = role === "admin";
   const teamOptions = tree.teams.map(({ id, name }) => ({ id, name }));
   const agentCount =
     tree.unassigned.length + tree.teams.reduce((n, team) => n + team.agents.length, 0);
@@ -203,6 +206,36 @@ async function OrgConsoleContent() {
           </article>
         )}
       </section>
+
+      {canEdit && (
+        <section aria-label="Policies" className="flex flex-col gap-4">
+          <h2 className="text-xl font-medium">Policies</h2>
+          <p className="text-sm text-muted">
+            Write a rule in plain English. Piko compiles it into a rule you can read, and nothing
+            is enforced until you confirm it.
+          </p>
+          <PolicyCompiler />
+          {savedPolicies.length > 0 && (
+            <ul className="divide-y divide-line rounded-xl border border-line">
+              {savedPolicies.map((policy) => (
+                <li key={policy.id} className="flex flex-col gap-1 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{policy.sourceText}</span>
+                    <span className="rounded border border-line px-1.5 text-xs text-muted">
+                      {policy.status === "enforced" ? "Enforced" : "Not enforced"}
+                    </span>
+                  </div>
+                  <ul className="list-disc pl-5 text-sm text-muted">
+                    {policy.readable.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {canEdit && (
         <section aria-label="Add" className="flex flex-col gap-4 rounded-xl border border-line p-5">

@@ -399,7 +399,7 @@ Covers TEST_PLAN **F12**, **F13** and the [SUBMISSION.md](SUBMISSION.md) checkli
   - **Done when:** Running the seed twice gives identical dashboards, and every seeded Call has `simulated = true`.
   - **Depends on:** Phases 1–7
 
-- [ ] **P9-02 Live simulated traffic** · `core` `ui` · S
+- [x] **P9-02 Live simulated traffic** · `core` `ui` · S
   - **Goal:** `POST /api/demo/simulate` turns on 1–3 synthetic calls a second, with a start and stop toggle. Every simulated item in the UI carries a "simulated" label.
   - **Done when:** Every F12 item passes.
   - **Depends on:** P9-01

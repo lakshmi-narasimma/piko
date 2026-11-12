@@ -36,9 +36,12 @@ export function SimulateToggle() {
   }, []);
 
   useEffect(() => {
-    void load();
+    const first = setTimeout(() => void load(), 0);
     const timer = setInterval(() => void load(), POLL_MS);
-    return () => clearInterval(timer);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
   }, [load]);
 
   async function send(action: "start" | "stop") {

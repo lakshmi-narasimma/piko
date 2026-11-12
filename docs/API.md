@@ -199,7 +199,7 @@ An autopay gateway request (§2) returns the `/api/pay` errors above, plus these
 | `POST /api/approvals/{id}/decide` | Approve or deny |
 | `POST /api/freeze` / `POST /api/unfreeze` | Kill switch for an agent, team or org |
 | `CRUD /api/orgs/{id}/teams`, `/agents`, `/keys`, `/budgets` | Org structure |
-| `POST /api/listings` | Create a listing from a base URL (+ optional OpenAPI/docs text) |
+| `POST /api/listings` | Create a Listing from a base URL, with its Endpoints and prices (see below). The pricing assistant reads the OpenAPI/docs text |
 | `POST /api/listings/{id}/suggest-pricing` | Gemini pricing assistant |
 | `CRUD /api/endpoints`, `/api/rate-overrides` | Prices and enterprise rates |
 | `POST /api/payouts/withdraw` | Manual seller payout |
@@ -217,3 +217,28 @@ These are the upstreams the seeded listings point at (SEED_DATA.md §3); buyers 
 Product Search returns `{ "products": [...], "source": "channel3" | "fallback" }`. Its Channel3 API key stays server-side. Price History returns `{ "productId": "…", "currency": "USD", "history": [{ "date": "YYYY-MM-DD", "priceMicroUsd": "…" }] }`; the fixed window and integer micro-USD values are deterministic for each product ID.
 
 Both review APIs take `{ "reviews": string | string[], "product"?: string }` (a string of up to 20,000 characters, or 1–50 non-empty reviews of up to 2,000 characters each; `product` up to 200 characters) and return `{ "product": string | null, "reviewCount": n, "sentiment": "positive" | "mixed" | "negative", "pros": string[], "cons": string[], "verdict": "…" }` (at most 5 pros and 5 cons; `reviewCount` is the number of reviews actually read). A bad body is `400 invalid_request`, and when every model in the `lib/llm` chain is busy they return `503 ai_busy` with the safe "AI is busy" message (standard error body, §4).
+
+### Creating a Listing (`POST /api/listings`)
+Only a signed-in admin of a seller org (the Seller console) can call it, and the Listing always belongs to their own org. Signed out gets `401 unauthenticated`; a Wallet or Org console account, or a seller member who is not an admin, gets `403 forbidden`.
+
+```json
+{
+  "baseUrl": "https://api.example.com/v1",
+  "name": "Weather Now",
+  "description": "Current weather for a city.",
+  "category": "weather",
+  "kind": "http",
+  "slug": "weather-now",
+  "endpoints": [
+    { "method": "GET", "path": "/forecast", "price": "0.002" },
+    { "method": "POST", "path": "/bulk", "priceMicro": "10000", "freeQuota": 5 }
+  ]
+}
+```
+- `category`, `kind` (`http` default, `mcp`, `both`) and `slug` are optional. Without a `slug`, one is made from the name, with `-2`, `-3`… added if the seller already uses it. A `slug` the seller already uses gets `409 slug_taken`.
+- Each Endpoint has an HTTP `method` (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`), a root-relative `path` (letters, digits, `.`, `_`, `~`, `-`; no query or `.`/`..` segments), and exactly one of `priceMicro` (whole micro-USD as a string) or `price` (dollars as typed, up to six decimals). A price is $0 to $100 per Call. `freeQuota` defaults to 0. 1 to 50 Endpoints, no route twice.
+- **A route is unique per seller**, because the gateway URL `/g/{seller}/{path}` names no Listing. A route the seller already lists on another Listing gets `409 route_taken` with `method` and `path`, and nothing is written.
+- **SSRF guard.** The base URL must be `http` or `https`, with no username, password, query or fragment. Its hostname is resolved and refused with `400 blocked_base_url` if any address is loopback, private (10/8, 172.16/12, 192.168/16), link-local (169.254/16, which holds the cloud metadata address), CGNAT (100.64/10), multicast, reserved or documentation space, or the IPv6 equivalents (`::1`, `fc00::/7`, `fe80::/10`, and IPv4-mapped, NAT64 and 6to4 forms of a blocked IPv4 address). A host that doesn't resolve also gets `400 blocked_base_url` (`reason: "unresolvable_host"`). The one exception is the app's own `${APP_BASE_URL}/api/demo/…`, where the demo sellers live; any other URL on the app's origin is refused. Other bad URLs get `400 invalid_base_url`. The check is `lib/gateway/ssrf`.
+- **Embedding.** The Listing is embedded for the Directory when it's created. If every embedding model is busy, the Listing is still created, with `"embedded": false`, and the Directory embeds it on its next search.
+- A bad body gets `400 invalid_request` with `issues: [{ path, message }]`.
+- The Listing and its Endpoints are written in one transaction and are live on the gateway at once. The answer is `201 { "listing": { id, slug, name, description, category, kind, baseUrl, seller: { slug }, embedded, endpoints: [{ id, method, path, priceMicro, price, freeQuota, gatewayUrl }] } }`, where `gatewayUrl` is `${APP_BASE_URL}/g/{seller}{path}` and `price` is the display form (`"$0.002"`).

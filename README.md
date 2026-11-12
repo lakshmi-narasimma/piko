@@ -53,7 +53,6 @@ More detail: [docs/DESIGN.md](docs/DESIGN.md) · API: [docs/API.md](docs/API.md)
 |---|---|
 | **Google Gemini** (free tier) | The budget-aware shopping agent in the playground. Turning plain-English policies into enforceable rules. Suggesting prices from a seller's API docs. Embeddings for directory search. |
 | **PayPal Agent Toolkit** | Gives the playground agent PayPal actions (checkout, invoicing) |
-| **Claude Code** (Anthropic) | Wrote the code, with the team directing the design |
 
 ## Sponsor tools
 | Tool | Use |

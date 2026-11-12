@@ -101,6 +101,9 @@ const envSchema = z.object({
   CHALLENGE_TTL_SECONDS: positiveInt.default(30),
   RECEIPT_TTL_SECONDS: positiveInt.default(60),
   UPSTREAM_TIMEOUT_MS: positiveInt.default(10_000),
+  // The largest request body the gateway forwards, and the largest upstream response it reads.
+  GATEWAY_MAX_BODY_BYTES: positiveInt.default(1_048_576),
+  GATEWAY_MAX_RESPONSE_BYTES: positiveInt.default(5_242_880),
 });
 
 export type Env = z.infer<typeof envSchema>;

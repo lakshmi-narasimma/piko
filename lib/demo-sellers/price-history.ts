@@ -1,3 +1,5 @@
+import { rejectUnlessFromGateway } from "./auth";
+
 const DAYS = 90;
 const END_DATE = "2026-11-10";
 
@@ -39,6 +41,8 @@ export function createPriceHistory(productId: string): PricePoint[] {
 }
 
 export function handlePriceHistory(request: Request): Response {
+  const rejected = rejectUnlessFromGateway(request);
+  if (rejected) return rejected;
   const productId = new URL(request.url).searchParams.get("product")?.trim() ?? "";
   if (!productId || productId.length > 200) {
     return Response.json(

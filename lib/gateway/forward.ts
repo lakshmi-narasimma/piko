@@ -23,17 +23,30 @@ const REQUEST_HEADERS_NOT_FORWARDED = [
 ];
 
 // fetch has already decoded the body, so the original framing headers no longer describe it.
+// set-cookie is dropped because the gateway answers on the app's origin: a seller must never
+// be able to set (or overwrite) a cookie there, such as the dashboard's session.
 const RESPONSE_HEADERS_NOT_FORWARDED = [
   "connection",
   "content-encoding",
   "content-length",
   "keep-alive",
   "proxy-authenticate",
+  "set-cookie",
   "te",
   "trailer",
   "transfer-encoding",
   "upgrade",
 ];
+
+/**
+ * Set on every proxied response. A seller's body is served from the app's origin, so a
+ * browser must never run it as an active page there: no sniffing a JSON body into HTML,
+ * and any HTML that is served gets a sandboxed, opaque origin with no scripts.
+ */
+export const PROXIED_RESPONSE_HEADERS: Record<string, string> = {
+  "X-Content-Type-Options": "nosniff",
+  "Content-Security-Policy": "sandbox",
+};
 
 // Headers whose value is a URL. One that points at the upstream would reveal the seller's
 // base URL, so it is rewritten onto the gateway (see rewriteUpstreamUrl).
@@ -73,8 +86,45 @@ export type UpstreamResult =
 export interface ForwardOptions {
   /** How long the whole upstream call may take, body included. */
   timeoutMs: number;
-  /** The seller's shared secret. `listings` has no column for it yet, so this is null. */
+  /**
+   * The secret sent as X-Piko-Secret. `listings` has no column for a seller's own secret
+   * yet, so this is DEMO_UPSTREAM_SECRET for the sample seller APIs and null otherwise
+   * (see upstreamSecretFor).
+   */
   upstreamSecret?: string | null;
+}
+
+/** Where the sample seller APIs live under the app (docs/SEED_DATA.md §3). */
+export const DEMO_SELLERS_PATH = "/api/demo/sellers";
+
+/** The full upstream URL for a request: only the stored route chooses it. */
+export function upstreamUrl(route: Pick<GatewayRoute, "baseUrl" | "path">, request: Request) {
+  return `${route.baseUrl.replace(/\/+$/, "")}${route.path}${new URL(request.url).search}`;
+}
+
+/**
+ * The secret to send a route's upstream. Only the app's own sample seller APIs, under
+ * `${appBaseUrl}/api/demo/sellers/`, get DEMO_UPSTREAM_SECRET: sending it anywhere else
+ * would hand it to a third-party seller. Sellers have no stored secret yet, so any other
+ * upstream gets none.
+ */
+export function upstreamSecretFor(
+  url: string,
+  config: { appBaseUrl: string; demoUpstreamSecret?: string },
+): string | null {
+  if (!config.demoUpstreamSecret) return null;
+  let target: URL;
+  let app: URL;
+  try {
+    target = new URL(url);
+    app = new URL(config.appBaseUrl);
+  } catch {
+    return null;
+  }
+  // URL parsing has already resolved any "." or ".." segments in the path.
+  const prefix = `${app.pathname.replace(/\/+$/, "")}${DEMO_SELLERS_PATH}/`;
+  if (target.origin !== app.origin || !target.pathname.startsWith(prefix)) return null;
+  return config.demoUpstreamSecret;
 }
 
 export type ForwardableBody = { ok: true; body: ArrayBuffer | null } | { ok: false };
@@ -133,7 +183,7 @@ export async function forwardUpstream(
   body: ArrayBuffer | null,
   options: ForwardOptions,
 ): Promise<UpstreamResult> {
-  const url = `${route.baseUrl.replace(/\/+$/, "")}${route.path}${new URL(request.url).search}`;
+  const url = upstreamUrl(route, request);
 
   const headers = new Headers(request.headers);
   for (const name of REQUEST_HEADERS_NOT_FORWARDED) headers.delete(name);

@@ -3,6 +3,8 @@ import { requirePrincipal } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { formatUsd } from "@/lib/money";
 import { loadOrgTree, type Spend, type TreeAgent, type TreeBudget } from "@/lib/org";
+import { isOrgFrozen } from "@/lib/org/freeze";
+import { FreezeButton, FrozenBadge, OrgFreezeSwitch } from "./freeze-controls";
 import { CreateAgentForm, CreateTeamForm, MoveAgentForm, type TeamOption } from "./tree-forms";
 
 export const metadata = { title: "Org console · Piko" };
@@ -43,31 +45,34 @@ function AgentRow({
   agent,
   teams,
   canEdit,
+  blockedBy,
 }: {
   agent: TreeAgent;
   teams: TeamOption[];
   canEdit: boolean;
+  /** A wider kill switch that also stops this agent. */
+  blockedBy?: "team" | "org";
 }) {
   return (
     <li className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
       <div className="flex flex-col gap-0.5">
         <span className="font-medium">
           <code>{agent.name}</code>
-          {agent.frozen && (
-            <span className="ml-2 rounded border border-line px-1.5 text-xs text-muted">
-              frozen
-            </span>
-          )}
+          {agent.frozen && <FrozenBadge />}
+          {blockedBy && <FrozenBadge via={blockedBy} />}
         </span>
         <span className="text-sm text-muted">
           <BudgetText budgets={agent.budgets} />, <SpendText spend={agent} />
         </span>
       </div>
       {canEdit && (
-        <MoveAgentForm
-          agent={{ id: agent.id, name: agent.name, teamId: agent.teamId }}
-          teams={teams}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <MoveAgentForm
+            agent={{ id: agent.id, name: agent.name, teamId: agent.teamId }}
+            teams={teams}
+          />
+          <FreezeButton scope="agent" id={agent.id} name={agent.name} frozen={agent.frozen} />
+        </div>
       )}
     </li>
   );
@@ -76,7 +81,10 @@ function AgentRow({
 // Reads the session cookie and the database, so it renders at request time inside Suspense.
 async function OrgConsoleContent() {
   const { org, role } = await requirePrincipal("org");
-  const tree = await loadOrgTree(getDb(), org.id);
+  const [tree, orgFrozen] = await Promise.all([
+    loadOrgTree(getDb(), org.id),
+    isOrgFrozen(getDb(), org.id),
+  ]);
   const canEdit = role === "admin";
   const teamOptions = tree.teams.map(({ id, name }) => ({ id, name }));
   const agentCount =
@@ -114,7 +122,22 @@ async function OrgConsoleContent() {
       </section>
 
       <section aria-label="Teams and agents" className="flex flex-col gap-4">
-        <h2 className="text-xl font-medium">Teams and agents</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-medium">
+            Teams and agents
+            {orgFrozen && <FrozenBadge />}
+          </h2>
+          {canEdit && <OrgFreezeSwitch orgName={org.name} frozen={orgFrozen} />}
+        </div>
+        {orgFrozen && (
+          <p
+            role="status"
+            className="rounded-md border border-red-700 px-4 py-3 text-sm text-red-700 dark:border-red-400 dark:text-red-400"
+          >
+            Kill switch on for the whole org: every agent gets 423 agent_frozen, even for Receipts
+            it already holds.
+          </p>
+        )}
         {tree.teams.length === 0 && tree.unassigned.length === 0 && (
           <p className="text-muted">No teams or agents yet.</p>
         )}
@@ -123,22 +146,30 @@ async function OrgConsoleContent() {
             <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line bg-surface px-4 py-3">
               <h3 className="text-lg font-medium">
                 {team.name}
-                {team.frozen && (
-                  <span className="ml-2 rounded border border-line px-1.5 text-xs text-muted">
-                    frozen
-                  </span>
-                )}
+                {team.frozen && <FrozenBadge />}
+                {orgFrozen && <FrozenBadge via="org" />}
               </h3>
-              <span className="text-sm">
-                <BudgetText budgets={team.budgets} />, <SpendText spend={team} />
-              </span>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm">
+                  <BudgetText budgets={team.budgets} />, <SpendText spend={team} />
+                </span>
+                {canEdit && (
+                  <FreezeButton scope="team" id={team.id} name={team.name} frozen={team.frozen} />
+                )}
+              </div>
             </header>
             {team.agents.length === 0 ? (
               <p className="px-4 py-3 text-sm text-muted">No agents in this team.</p>
             ) : (
               <ul className="divide-y divide-line">
                 {team.agents.map((agent) => (
-                  <AgentRow key={agent.id} agent={agent} teams={teamOptions} canEdit={canEdit} />
+                  <AgentRow
+                    key={agent.id}
+                    agent={agent}
+                    teams={teamOptions}
+                    canEdit={canEdit}
+                    blockedBy={orgFrozen ? "org" : team.frozen ? "team" : undefined}
+                  />
                 ))}
               </ul>
             )}
@@ -151,7 +182,13 @@ async function OrgConsoleContent() {
             </header>
             <ul className="divide-y divide-line">
               {tree.unassigned.map((agent) => (
-                <AgentRow key={agent.id} agent={agent} teams={teamOptions} canEdit={canEdit} />
+                <AgentRow
+                  key={agent.id}
+                  agent={agent}
+                  teams={teamOptions}
+                  canEdit={canEdit}
+                  blockedBy={orgFrozen ? "org" : undefined}
+                />
               ))}
             </ul>
           </article>

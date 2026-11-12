@@ -118,7 +118,15 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "410": { $ref: "#/components/responses/Error" }
-        "423": { $ref: "#/components/responses/Error" }
+        "423":
+          description: |
+            The kill switch is on for the agent, its team or its org (code agent_frozen,
+            details scope). This includes a PAYMENT-SIGNATURE whose Receipt was issued before
+            the freeze or a breaker trip: it is not forwarded, nothing is charged and its hold
+            is released, so it can never be used again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "429":
           description: With X-Piko-Autopay, the circuit breaker froze the agent (code breaker_tripped); nothing was forwarded or charged
           content:
@@ -302,7 +310,9 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/VerifyResponse" }
         "200":
-          description: Verification result
+          description: |
+            Verification result. invalidReason is agent_frozen when the kill switch is on for
+            the paying agent, its team or its org.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VerifyResponse" }
@@ -345,6 +355,13 @@ paths:
               schema: { $ref: "#/components/schemas/Settlement" }
         "410":
           description: The receipt expired or was already used; success is false and errorReason is challenge_expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settlement" }
+        "423":
+          description: |
+            The kill switch is on for the paying agent, its team or its org; success is false
+            and errorReason is agent_frozen. Nothing is charged and the hold is released.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Settlement" }

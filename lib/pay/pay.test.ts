@@ -67,6 +67,7 @@ describe.skipIf(!url)("POST /api/pay", () => {
       "frozen",
       "challenge",
       "breaker",
+      "budget",
       "funds",
       "breaker-recount",
       "receipt",

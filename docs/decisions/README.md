@@ -14,3 +14,4 @@ One file per settled decision and the reason for it. To change a decision, add a
 - [0010. The product is named Piko](0010-name-piko.md)
 - [0011. x402 v2 message shapes for `paypal-ledger`, and the Gemini models](0011-x402-v2-and-gemini-model.md)
 - [0012. Drizzle ORM over node-postgres](0012-drizzle.md)
+- [0013. How Budgets count spend, and what a "task" is](0013-task-budgets.md)

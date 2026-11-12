@@ -269,7 +269,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** Dana sees Acme's 3 teams and 5 agents (from a temporary seed until P9-01).
   - **Depends on:** P2-03
 
-- [ ] **P5-02 Budgets** · `core` · M
+- [x] **P5-02 Budgets** · `core` · M
   - **Goal:** Budgets at the org, team, agent and task level, by day, month or task, with an optional category. Spend comes from the ledger. Add the budget step to the pay pipeline, returning 402 `budget_exceeded` with `remaining`.
   - **Done when:** The F5 agent-budget and team-budget items pass.
   - **Depends on:** P1-09
@@ -295,7 +295,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Depends on:** P1-09
 
 - [ ] **P5-07 Kill switch** · `core` `ui` · M
-  - **Goal:** Freeze and unfreeze an agent, a team or a whole org. A frozen agent gets 423 `agent_frozen`. Add the controls to the Org console.
+  - **Goal:** Freeze and unfreeze an agent, a team or a whole org. A frozen agent gets 423 `agent_frozen`, and so does a Receipt it already holds: the gateway's `PAYMENT-SIGNATURE` path must also refuse a frozen agent, team or org, so Receipts issued before a breaker trip or a freeze can't be redeemed after it. Add the controls to the Org console.
   - **Done when:** The F6 team-freeze and org-freeze items pass.
   - **Depends on:** P5-06, P5-01
 

@@ -158,7 +158,7 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 | 429 | `breaker_tripped` | Circuit breaker froze the agent just now | `reason` (`calls` or `spend`), `calls`, `windowSeconds`, `spentPerMinute`: micro-USD |
 | 403 | `policy_denied` | A policy blocks this vendor or price | `policyId`, `rule` |
 | 202 | `approval_pending` | Needs a human; poll the approval | `approvalId`, `approvalUrl` |
-| 402 | `budget_exceeded` | Agent, team or org budget is used up | `scope`, `remaining` |
+| 402 | `budget_exceeded` | This payment would take an agent, team or org budget over its cap | `scope`, `remaining`, `budgetId`, `period`, `category`, `max` |
 | 410 | `challenge_expired` | Nonce expired or already used | — |
 | 402 | `insufficient_funds` | Prepaid balance or org credit limit is too low | `balance`: micro-USD available |
 
@@ -175,7 +175,11 @@ The gateway never issues a $0 Challenge (a $0 endpoint is forwarded free, see §
 
 `POST /api/pay` must see the challenge before the funds check, so a stale nonce gets 410 even with an empty wallet.
 
+The steps run in the order of docs/DESIGN.md §9: the Key, the kill switch, the Challenge lookup (`404`, `403 challenge_buyer_mismatch`), the circuit breaker, policies, budgets, then funds (where an expired or used Challenge gets `410` and low funds `402`), the breaker's recount (`429`), and the Receipt.
+
 **Circuit breaker.** An agent trips it by paying for more than `BREAKER_MAX_CALLS` Calls in the last `BREAKER_WINDOW_SECONDS` (default 50 in 10 s), or more than `BREAKER_MAX_MICRO_PER_MINUTE` (default $2.00) in the last minute, counting the payment being made. What counts is every payment the agent reserved, whatever happened to it after (settled, refunded on an upstream failure, or never used); a retry of the same nonce counts once. A request stopped before the funds check reserves nothing and doesn't count, and free-allowance Calls never reach `/api/pay`. A trip freezes the agent, writes one `breaker_tripped` alert for the org and returns 429 with `calls` and `spentPerMinute` including this payment; the agent's next request gets `423 agent_frozen` until a human unfreezes it. The breaker counts again right after the funds check, so a concurrent burst can't get past it together: a request over the limit there also gets 429, and its hold is released, so nothing is charged. That recount can stop every request of a burst that crosses the limit at once.
+
+**Budgets.** Every budget covering the paying agent is checked, the agent's first, then its team's, then its org's, and the first one the Challenge's amount doesn't fit in is reported. `scope` is `agent`, `team` or `org`; `period` is `day`, `month` or `task`; `category` is the listing category the budget is limited to, or `null` for all; `max` and `remaining` are micro-USD strings. `remaining` is what is left before this payment: `max` minus settled spend in the current period (net of refunds) minus every unsettled hold, never below `"0"`. A payment that exactly uses up `remaining` passes. Periods are UTC days and months, and the current one is found with the database clock, the same clock that stamps each Call. A `task` budget counts from when its cap was last changed: saving the same cap again, or changing only other limits, keeps the task going. Holds count so that concurrent payments can't both fit under one cap; a retry of a payment that already holds its amount isn't counted twice.
 
 The gateway (`/g/{seller}/{path}`) and the facilitator's `verify` and `settle` also answer an unexpected failure with `500 internal_error` in this error body, logging the cause on the server. For the facilitator this is the one answer that is not an x402 response.
 

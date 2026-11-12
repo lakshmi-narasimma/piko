@@ -207,7 +207,7 @@ Piko follows x402's shape (HTTP 402 → pay → retry with proof) and acts as th
 
 Order of checks inside `POST /pay`. The first failure stops the call:
 1. Key is valid and the agent is not frozen (kill switch).
-2. **Circuit breaker:** more than N calls in a sliding window (default **50 calls / 10 s per agent**) or more than **$X / minute** (default **$2.00**) → freeze the agent, create an alert, return 429. A call counts once its funds are reserved, whatever happens to it after; the window is read from `challenges.reserved_at`, and a recount after step 5 keeps a concurrent burst from slipping past (API.md §4).
+2. **Circuit breaker:** more than N calls in a sliding window (default **50 calls / 10 s per agent**) or more than **$X / minute** (default **$2.00**) → freeze the agent, create an alert, return 429. A call counts once its funds are reserved, whatever happens to it after; the window is read from `challenges.reserved_at`, and a recount after step 5 keeps a concurrent burst from slipping past (API.md §4). Free-allowance calls and calls to a $0 endpoint never reach `POST /pay`, so the breaker doesn't count them; once a buyer's free allowance is used up, its calls are paid and count.
 3. **Policies**, in order: vendor block/allow → max price per call → "approval above $Y" (creates an Approval and returns 202 `approval_pending`).
 4. **Budgets:** agent → team → org for the current period. Any one exceeded → 402 `budget_exceeded`.
 5. **Funds:** the prepaid wallet balance, or the org's remaining credit limit.

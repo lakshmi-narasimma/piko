@@ -92,6 +92,12 @@ const envSchema = z.object({
     .transform((value) => BigInt(value)),
   BREAKER_MAX_CALLS: positiveInt.default(50),
   BREAKER_WINDOW_SECONDS: positiveInt.default(10),
+  // The circuit breaker's dollars-per-minute limit, in micro-USD (DESIGN.md section 9).
+  BREAKER_MAX_MICRO_PER_MINUTE: z
+    .string()
+    .regex(/^[1-9]\d*$/, "must be a positive whole number of micro-USD")
+    .default("2000000")
+    .transform((value) => BigInt(value)),
   CHALLENGE_TTL_SECONDS: positiveInt.default(30),
   RECEIPT_TTL_SECONDS: positiveInt.default(60),
   UPSTREAM_TIMEOUT_MS: positiveInt.default(10_000),

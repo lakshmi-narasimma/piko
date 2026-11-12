@@ -289,7 +289,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** Both F5 compiler items pass.
   - **Depends on:** P5-03, P1-05
 
-- [ ] **P5-06 Circuit breaker** · `core` · M
+- [x] **P5-06 Circuit breaker** · `core` · M
   - **Goal:** `lib/breaker` keeps a sliding window per agent (`BREAKER_MAX_CALLS` per `BREAKER_WINDOW_SECONDS`) and a dollars-per-minute limit. Tripping it freezes the agent, writes an alert and returns 429 `breaker_tripped`. It's the second step in the pay pipeline.
   - **Done when:** The F6 breaker item passes with `loop-bot`.
   - **Depends on:** P1-09

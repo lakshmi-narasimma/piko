@@ -119,6 +119,11 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "410": { $ref: "#/components/responses/Error" }
         "423": { $ref: "#/components/responses/Error" }
+        "429":
+          description: With X-Piko-Autopay, the circuit breaker froze the agent (code breaker_tripped); nothing was forwarded or charged
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "500":
           description: Something unexpected failed (code internal_error); the cause is logged on the server
           content:
@@ -169,7 +174,14 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
         "423": { $ref: "#/components/responses/Error" }
-        "429": { $ref: "#/components/responses/Error" }
+        "429":
+          description: |
+            The circuit breaker froze the agent (code breaker_tripped). Details: reason
+            (calls or spend), calls, windowSeconds and spentPerMinute (micro-USD), each
+            including this payment. Nothing was charged.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "500": { $ref: "#/components/responses/Error" }
 
   /api/approvals/{id}:

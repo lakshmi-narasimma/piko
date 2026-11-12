@@ -153,7 +153,7 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 |---|---|---|---|
 | 401 | `invalid_key` | Missing, wrong or revoked key | — |
 | 423 | `agent_frozen` | Kill switch is on for the agent, its team or its org | `scope` |
-| 429 | `breaker_tripped` | Circuit breaker froze the agent just now | `calls`, `windowSeconds` |
+| 429 | `breaker_tripped` | Circuit breaker froze the agent just now | `reason` (`calls` or `spend`), `calls`, `windowSeconds`, `spentPerMinute`: micro-USD |
 | 403 | `policy_denied` | A policy blocks this vendor or price | `policyId`, `rule` |
 | 202 | `approval_pending` | Needs a human; poll the approval | `approvalId`, `approvalUrl` |
 | 402 | `budget_exceeded` | Agent, team or org budget is used up | `scope`, `remaining` |
@@ -172,6 +172,8 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 The gateway never issues a $0 Challenge (a $0 endpoint is forwarded free, see §2), so `invalid_amount` from `/api/pay` only means bad data.
 
 `POST /api/pay` must see the challenge before the funds check, so a stale nonce gets 410 even with an empty wallet.
+
+**Circuit breaker.** An agent trips it by paying for more than `BREAKER_MAX_CALLS` Calls in the last `BREAKER_WINDOW_SECONDS` (default 50 in 10 s), or more than `BREAKER_MAX_MICRO_PER_MINUTE` (default $2.00) in the last minute, counting the payment being made. What counts is every payment the agent reserved, whatever happened to it after (settled, refunded on an upstream failure, or never used); a retry of the same nonce counts once. A request stopped before the funds check reserves nothing and doesn't count, and free-allowance Calls never reach `/api/pay`. A trip freezes the agent, writes one `breaker_tripped` alert for the org and returns 429 with `calls` and `spentPerMinute` including this payment; the agent's next request gets `423 agent_frozen` until a human unfreezes it. The breaker counts again right after the funds check, so a concurrent burst can't get past it together: a request over the limit there also gets 429, and its hold is released, so nothing is charged. That recount can stop every request of a burst that crosses the limit at once.
 
 The gateway (`/g/{seller}/{path}`) and the facilitator's `verify` and `settle` also answer an unexpected failure with `500 internal_error` in this error body, logging the cause on the server. For the facilitator this is the one answer that is not an x402 response.
 

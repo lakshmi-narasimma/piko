@@ -162,7 +162,7 @@ Every error body is `{ "error": { "code": "...", "message": "...", ...details } 
 | 401 | `invalid_key` | Missing, wrong or revoked key | — |
 | 423 | `agent_frozen` | Kill switch is on for the agent, its team or its org | `scope` |
 | 429 | `breaker_tripped` | Circuit breaker froze the agent just now | `reason` (`calls` or `spend`), `calls`, `windowSeconds`, `spentPerMinute`: micro-USD |
-| 403 | `policy_denied` | A policy blocks this vendor or price | `policyId`, `rule` |
+| 403 | `policy_denied` | A confirmed Policy of the agent, its team or its org blocks this vendor or price. Checked in order: vendor block and allow, max price per call, approval above. Until P5-04 adds approvals, a payment over an `approval_above` threshold is denied too | `policyId`, `rule` (`vendor_block`, `vendor_allow`, `max_price_per_call` or `approval_above`), `policy`: its source text |
 | 202 | `approval_pending` | Needs a human; poll the approval | `approvalId`, `approvalUrl` |
 | 402 | `budget_exceeded` | This payment would take an agent, team or org budget over its cap | `scope`, `remaining`, `budgetId`, `period`, `category`, `max` |
 | 410 | `challenge_expired` | Nonce expired or already used | — |

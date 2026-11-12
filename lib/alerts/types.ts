@@ -9,6 +9,9 @@ export const BREAKER_TRIPPED = "breaker_tripped";
 /** The alert type a payment blocked by a Budget writes. */
 export const BUDGET_ALERT_TYPE = "budget_exceeded";
 
+/** The alert type a payment blocked by a Policy writes. */
+export const POLICY_ALERT_TYPE = "policy_denied";
+
 /** One alert as the panel shows it. */
 export interface AlertView {
   id: string;

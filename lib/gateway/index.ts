@@ -4,6 +4,7 @@
  *
  * The route file passes in the database and config, so tests can drive this directly.
  */
+import type { BreakerLimits } from "../breaker";
 import type { Db } from "../db/client";
 import { getEnv } from "../env";
 import { jsonError, orInternalError } from "../http";
@@ -59,6 +60,8 @@ function bodyTimeoutMs(config: GatewayConfig): number {
 export interface GatewayDeps {
   db: Db;
   config: GatewayConfig;
+  /** The circuit breaker's limits for autopay. Read from the environment when left out. */
+  breaker?: BreakerLimits;
 }
 
 export function gatewayConfigFromEnv(): GatewayConfig {

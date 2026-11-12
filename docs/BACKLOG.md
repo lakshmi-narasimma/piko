@@ -295,7 +295,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Depends on:** P1-09
 
 - [ ] **P5-07 Kill switch** · `core` `ui` · M
-  - **Goal:** Freeze and unfreeze an agent, a team or a whole org. A frozen agent gets 423 `agent_frozen`. Add the controls to the Org console.
+  - **Goal:** Freeze and unfreeze an agent, a team or a whole org. A frozen agent gets 423 `agent_frozen`, and so does a Receipt it already holds: the gateway's `PAYMENT-SIGNATURE` path must also refuse a frozen agent, team or org, so Receipts issued before a breaker trip or a freeze can't be redeemed after it. Add the controls to the Org console.
   - **Done when:** The F6 team-freeze and org-freeze items pass.
   - **Depends on:** P5-06, P5-01
 

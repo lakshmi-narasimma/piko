@@ -264,7 +264,7 @@ Covers part of TEST_PLAN **F10**.
 ## Phase 5: Org controls
 Covers TEST_PLAN **F5** and **F6**.
 
-- [ ] **P5-01 Org console shell** · `ui` · M
+- [x] **P5-01 Org console shell** · `ui` · M
   - **Goal:** The team and agent tree for Acme, with each budget and spend so far. Create teams and agents, and move agents between teams.
   - **Done when:** Dana sees Acme's 3 teams and 5 agents (from a temporary seed until P9-01).
   - **Depends on:** P2-03

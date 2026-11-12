@@ -110,6 +110,8 @@ describe.skipIf(!url)("directory search", () => {
       price: "$0.002",
       gatewayPath: `/g/dir-${tag}/prices-${tag}`,
     });
+    // The search answer's documented shape has no free quota (the Directory screen's does).
+    expect(mine[0]!.endpoints[0]).not.toHaveProperty("freeQuota");
   });
 
   it("embeds a Listing that has no vector, and keeps it", async () => {

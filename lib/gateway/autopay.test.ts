@@ -190,9 +190,24 @@ describe.skipIf(!url)("gateway: X-Piko-Autopay", () => {
     const res = await autopay(seller, buyer.rawKey);
 
     expect(res.status).toBe(502);
-    expect(await errorOf(res)).toMatchObject({ code: "upstream_failed", refunded: true });
+    const error = (await errorOf(res)) as { callId: string };
+    expect(error).toMatchObject({ code: "upstream_failed", refunded: true });
+    const settlement = decodeHeaderValue(
+      res.headers.get("PAYMENT-RESPONSE")!,
+    ) as SettlementResponse;
+    expect(settlement).toMatchObject({ success: false, errorReason: "upstream_failed" });
     expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
     expect(await availableFunds(db, buyer.orgId)).toBe(10_000n);
+    expect(await balanceOf(db, { type: "seller", orgId: seller.orgId })).toBe(0n);
+    const rows = await db.select().from(calls).where(eq(calls.agentId, buyer.agentId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: error.callId,
+      status: "refunded",
+      amountMicro: 2_000n,
+      upstreamStatus: 503,
+    });
+    expect(await callEntries(db, error.callId)).toHaveLength(0);
   });
 
   it("returns 429 and forwards nothing when the payment trips the circuit breaker", async () => {
@@ -315,6 +330,9 @@ describe.skipIf(!url)("gateway: X-Piko-Autopay", () => {
       expect(retry.status).toBe(410);
       expect(await errorOf(retry)).toMatchObject({ code: "challenge_expired" });
       expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+      // The failed first request is the only Call: one refunded Call for the key's Challenge.
+      const rows = await db.select().from(calls).where(eq(calls.agentId, buyer.agentId));
+      expect(rows.map((row) => row.status)).toEqual(["refunded"]);
     });
 
     it("after insufficient funds, the same key pays once the wallet can cover it", async () => {

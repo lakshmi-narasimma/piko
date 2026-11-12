@@ -13,7 +13,8 @@ import {
   confirmBreaker,
   type BreakerLimits,
 } from "../breaker";
-import { BudgetExceededError, enforceBudgets } from "../budgets";
+import { recordBudgetAlert } from "../alerts";
+import { BudgetExceededError, enforceBudgets, type BudgetState } from "../budgets";
 import type { Db } from "../db/client";
 import { challenges, endpoints, listings, orgs } from "../db/schema";
 import { jsonError } from "../http";
@@ -47,6 +48,23 @@ export class PayError extends Error {
   ) {
     super(message);
     this.name = "PayError";
+  }
+}
+
+/** A payment a Budget blocked. The pipeline writes its alert once the payment has stopped. */
+class BudgetBlockedError extends PayError {
+  constructor(
+    public readonly budget: BudgetState,
+    message: string,
+  ) {
+    super(402, "budget_exceeded", message, {
+      scope: budget.scope,
+      remaining: budget.remainingMicro.toString(),
+      budgetId: budget.budgetId,
+      period: budget.period,
+      category: budget.category,
+      max: budget.maxMicro.toString(),
+    });
   }
 }
 
@@ -237,15 +255,7 @@ const checkBudgets: PayStep = {
         });
       } catch (error) {
         if (!(error instanceof BudgetExceededError)) throw error;
-        const { budget } = error;
-        throw new PayError(402, "budget_exceeded", error.message, {
-          scope: budget.scope,
-          remaining: budget.remainingMicro.toString(),
-          budgetId: budget.budgetId,
-          period: budget.period,
-          category: budget.category,
-          max: budget.maxMicro.toString(),
-        });
+        throw new BudgetBlockedError(error.budget, error.message);
       }
     };
     // An early answer. The same check runs again under the org lock, so concurrent
@@ -337,8 +347,30 @@ export async function runPayPipeline(
   agent?: AuthenticatedAgent,
 ): Promise<IssuedReceipt> {
   const context: PayContext = { ...deps, headers, body, agent, holdChecks: [] };
-  for (const step of PAY_STEPS) await step.run(context);
+  try {
+    for (const step of PAY_STEPS) await step.run(context);
+  } catch (error) {
+    if (error instanceof BudgetBlockedError) await alertBudget(context, error);
+    throw error;
+  }
   return context.issued!;
+}
+
+/**
+ * Tells the org's admins a Budget blocked a payment (P5-08). Written after the payment's
+ * transaction is gone, so the alert survives its rollback. A failure here never changes the
+ * answer the Agent gets.
+ */
+async function alertBudget(context: PayContext, error: BudgetBlockedError): Promise<void> {
+  try {
+    await recordBudgetAlert(context.db, {
+      orgId: context.agent!.orgId,
+      agentId: context.agent!.agentId,
+      budget: error.budget,
+    });
+  } catch (failure) {
+    console.error("Could not write the budget alert", failure);
+  }
 }
 
 /** A Response for an error raised by {@link runPayPipeline}, or rethrows anything else. */

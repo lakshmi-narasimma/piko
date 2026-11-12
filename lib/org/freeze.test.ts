@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { describeAlertType } from "../alerts/types";
 import { createDb, type Db } from "../db/client";
 import { agents, alerts, orgs, teams } from "../db/schema";
 import { createKey, authenticateKey, currentFrozenScope } from "../keys";
@@ -66,6 +67,11 @@ describe.skipIf(!url)("kill switch: freeze and unfreeze", () => {
         return auth.ok ? auth.frozenScope : "invalid";
       }),
     );
+
+  it("writes alert types the Alerts panel labels Frozen and Unfrozen", () => {
+    expect(describeAlertType(FROZEN_ALERT_TYPE)).toEqual({ kind: "frozen", label: "Frozen" });
+    expect(describeAlertType(UNFROZEN_ALERT_TYPE)).toEqual({ kind: "unfrozen", label: "Unfrozen" });
+  });
 
   it("freezes and unfreezes one agent, writing one alert each way", async () => {
     const org = await newOrg();

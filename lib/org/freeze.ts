@@ -13,9 +13,9 @@ import type { Db } from "../db/client";
 import { agents, alerts, orgs, teams } from "../db/schema";
 import { OrgError, type Actor } from "./index";
 
-/** The alert type a freeze writes. P5-08's alerts panel shows it. */
+/** The alert type a freeze writes. lib/alerts/types labels it "Frozen" (tested). */
 export const FROZEN_ALERT_TYPE = "frozen";
-/** The alert type an unfreeze writes. */
+/** The alert type an unfreeze writes, labelled "Unfrozen". */
 export const UNFROZEN_ALERT_TYPE = "unfrozen";
 
 export type FreezeTarget = { scope: "org" } | { scope: "team" | "agent"; id: unknown };

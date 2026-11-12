@@ -249,12 +249,12 @@ Covers part of TEST_PLAN **F10**.
   - **Done when:** Tests cover a GET with a query, a POST with JSON, and a body that's too large.
   - **Depends on:** P4-01
 
-- [ ] **P4-03 Directory screen** · `ui` · M
+- [x] **P4-03 Directory screen** · `ui` · M
   - **Goal:** Search with cards showing name, description, price per call, rating, seller and HTTP or MCP badges. A card opens the listing's details and a copyable gateway URL.
   - **Done when:** The F9 directory item passes in the UI.
   - **Depends on:** P3-01, P2-03
 
-- [ ] **P4-04 "Connect an API" form** · `ui` · S
+- [x] **P4-04 "Connect an API" form** · `ui` · S
   - **Goal:** A seller pastes a URL, adds endpoints and prices, and publishes. Phase 6 builds the rest of the seller console.
   - **Done when:** The first F10 item passes as Priya.
   - **Depends on:** P4-01, P2-03
@@ -299,7 +299,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** The F6 team-freeze and org-freeze items pass.
   - **Depends on:** P5-06, P5-01
 
-- [ ] **P5-08 Alerts** · `ui` · S
+- [x] **P5-08 Alerts** · `ui` · S
   - **Goal:** An alerts panel in the Org console for breaker trips, budget hits and denials, with a badge on the navigation.
   - **Done when:** A breaker trip shows as an alert within a few seconds.
   - **Depends on:** P5-06
@@ -369,7 +369,7 @@ Covers TEST_PLAN **F8**.
 ## Phase 8: MCP, enterprise rates, refunds, pricing assistant
 Covers TEST_PLAN **F3**, **F11**, and the rest of **F2** and **F10**.
 
-- [ ] **P8-01 Automatic refunds** · `core` · M
+- [x] **P8-01 Automatic refunds** · `core` · M
   - **Goal:** An upstream 5xx or timeout releases the Call's reservation without posting any ledger entries (in the `authorization` flow nothing is posted before the upstream answers), marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
   - **Done when:** Every F3 item passes.
   - **Depends on:** P1-10

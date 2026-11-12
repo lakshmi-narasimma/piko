@@ -7,8 +7,9 @@ import { AI_BUSY_MESSAGE, getLlm, isAiBusy } from "@/lib/llm";
 
 /**
  * Semantic search over Listings: `GET /api/directory/search?q=product+prices&limit=5`.
- * An agent authenticates with its Key (the dashboard's Directory screen, P4-03, adds a session
- * route of its own). Prices are the caller's own (its enterprise rate where it has one).
+ * An agent authenticates with its Key. The dashboard's Directory screen (/directory) needs no
+ * route: its server components call lib/directory directly. Prices are the caller's own (its
+ * enterprise rate where it has one).
  */
 export async function GET(request: Request) {
   // Reads the environment, so it must not be prerendered at build time.

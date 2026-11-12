@@ -41,7 +41,7 @@ If the seller's API fails (5xx or timeout), the Call is refunded automatically. 
 | Playground           | Budget-aware shopping agent (Gemini, Groq fallback) that searches the Directory and pays for Calls through the real gateway, then a PayPal checkout of the product it picks                    |
 | Directory            | Embedding search over listings, listing detail pages with copyable gateway URLs                                                                                                                |
 | Seller console       | Earnings balance, Listings, editable prices and free allowances, "Connect an API" form                                                                                                         |
-| Org console          | Teams, agents, org and team Budgets, alerts panel and badge                                                                                                                                    |
+| Org console          | Teams, agents, org and team Budgets, alerts panel and badge, kill switch (freeze an agent, team or whole org), spend grid with CSV export                                                                                                                                    |
 | Policies and breaker | Deterministic policy schema and evaluator inside the pay pipeline; circuit breaker that freezes a runaway agent and raises an alert                                                            |
 | Invoice calculation  | Works out an org's monthly invoice from the ledger, one line per team (calculation only, see below)                                                                                            |
 | PayPal webhook       | `POST /api/paypal/webhook`: signature verified, events stored once, idempotent on the PayPal resource id                                                                                       |
@@ -53,8 +53,7 @@ These are not on main, so do not expect them in the demo:
 - **Seller payouts** (PayPal Payouts) and payout webhooks. Seller earnings accrue on the ledger but are not paid out to PayPal.
 - **PayPal Invoicing:** invoices are calculated but not created, sent or marked paid in PayPal, and there is no credit-limit enforcement from paid invoices.
 - **Approvals** for calls over a policy threshold, and the **plain-English policy compiler** (Gemini compiling text into a policy). Policies are evaluated, but there is no screen to write or confirm them.
-- **Manual kill switch** for an agent or team (the circuit breaker freeze is automatic).
-- **Spend grid and audit export**, **seller analytics**, **live earnings** view.
+- **Seller analytics** and the **live earnings** view.
 - **AI pricing assistant** and **enterprise rates**.
 - **Full demo seed** and **live simulated traffic**: `npm run seed` loads a minimal demo world only (personas, orgs, four sample listings).
 - The webhook handler only acts on `PAYMENT.CAPTURE.COMPLETED` (top-ups). Other event types are stored and ignored.

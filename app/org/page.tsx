@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Suspense } from "react";
 import { AlertsPanel } from "@/components/alerts-panel";
 import { requirePrincipal } from "@/lib/auth";
@@ -96,6 +97,11 @@ async function OrgConsoleContent() {
       <header className="flex flex-col gap-1">
         <h1 className="text-3xl font-semibold tracking-tight">Org console</h1>
         <p className="text-muted">{org.name}</p>
+        {canEdit && (
+          <Link href="/org/spend" className="text-sm font-medium hover:underline">
+            Spend grid and audit export →
+          </Link>
+        )}
       </header>
 
       <section aria-label="Org budget" className="grid gap-6 sm:grid-cols-3">

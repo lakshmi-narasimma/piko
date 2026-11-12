@@ -27,6 +27,8 @@
     "@ai-sdk/provider-utils": "^5.0.76",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@next/env": "^16.4.5",
+    "ag-grid-community": "36.2.0",
+    "ag-grid-react": "36.2.0",
     "ai": "^7.0.166",
     "drizzle-orm": "0.45.4",
     "next": "^16.4.5",

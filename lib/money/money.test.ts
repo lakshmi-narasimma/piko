@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatUsd, parseUsd, splitPrice } from ".";
+import { formatUsd, parseUsd, splitPrice, toUsdDecimal } from ".";
 
 describe("splitPrice", () => {
   it("splits an even price at 5%", () => {
@@ -99,6 +99,24 @@ describe("formatUsd", () => {
   it("round-trips with parseUsd", () => {
     for (const micro of [0n, 1n, 2000n, 999_999n, 1_000_001n, 123_456_789_012n, -42n]) {
       expect(parseUsd(formatUsd(micro))).toBe(micro);
+    }
+  });
+});
+
+describe("toUsdDecimal", () => {
+  it.each([
+    [0n, "0.000000"],
+    [1n, "0.000001"],
+    [2000n, "0.002000"],
+    [1_234_567_800n, "1234.567800"],
+    [-500_000n, "-0.500000"],
+  ])("writes %s micro-USD as %j", (micro, text) => {
+    expect(toUsdDecimal(micro)).toBe(text);
+  });
+
+  it("round-trips with parseUsd", () => {
+    for (const micro of [0n, 7n, 2000n, 1_000_000n, -123_456_789n]) {
+      expect(parseUsd(toUsdDecimal(micro))).toBe(micro);
     }
   });
 });

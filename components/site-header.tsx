@@ -22,9 +22,12 @@ export async function SiteHeader() {
         <Link href="/" className="text-lg font-semibold tracking-tight text-brand">
           Piko
         </Link>
-        <nav aria-label="Main" className="flex items-center gap-2 text-sm">
+        <nav aria-label="Main" className="flex flex-wrap items-center justify-end gap-2 text-sm">
           {principal ? (
             <>
+              <Link href="/directory" className={button}>
+                Directory
+              </Link>
               {principal.area === "wallet" && (
                 <Link href="/playground" className={button}>
                   Playground

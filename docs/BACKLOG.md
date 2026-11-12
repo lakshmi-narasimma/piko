@@ -249,7 +249,7 @@ Covers part of TEST_PLAN **F10**.
   - **Done when:** Tests cover a GET with a query, a POST with JSON, and a body that's too large.
   - **Depends on:** P4-01
 
-- [ ] **P4-03 Directory screen** · `ui` · M
+- [x] **P4-03 Directory screen** · `ui` · M
   - **Goal:** Search with cards showing name, description, price per call, rating, seller and HTTP or MCP badges. A card opens the listing's details and a copyable gateway URL.
   - **Done when:** The F9 directory item passes in the UI.
   - **Depends on:** P3-01, P2-03

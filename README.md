@@ -53,20 +53,21 @@ If the seller's API fails (5xx or timeout), the Call is refunded automatically. 
 
 These are not on main, so do not expect them in the demo:
 
-- **Seller payouts** (PayPal Payouts) and payout webhooks. Seller earnings accrue on the ledger but are not paid out to PayPal.
+- **Payout webhooks:** seller payouts are sent through PayPal Payouts (see below), but payout status webhooks are stored and not acted on yet.
 - **PayPal Invoicing:** invoices are calculated but not created, sent or marked paid in PayPal, and there is no credit-limit enforcement from paid invoices.
-- **Approvals** for calls over a policy threshold, and the **plain-English policy compiler** (Gemini compiling text into a policy). Policies are evaluated, but there is no screen to write or confirm them.
 - **Seller analytics** and the **live earnings** view.
 - **AI pricing assistant** and **enterprise rates**.
-- **Live simulated traffic** (a generator that keeps writing simulated Calls while you watch). `npm run seed` loads the full demo world, including about 12,000 historical Calls labelled "simulated".
 - The webhook handler only acts on `PAYMENT.CAPTURE.COMPLETED` (top-ups). Other event types are stored and ignored.
+
+Built in the final stretch (on main, newer than the hosted demo build until it redeploys): **seller payouts** through PayPal Payouts (withdraw button on `/seller`, idempotent on the payout id), **approvals** for calls over a policy threshold (an inbox on `/org`; the agent gets `202 approval_pending`), the **plain-English policy compiler** (Gemini turns text into a policy that an admin confirms before it applies), and **live simulated traffic** (a Start/Stop toggle on `/org`). `npm run seed` loads the full demo world, including about 12,000 historical Calls labelled "simulated".
 
 ## How PayPal is used
 
 - **Orders v2 and the JS SDK:** Wallet top-ups, and the end-of-demo product checkout in the playground (create an order, then capture it).
 - **Webhooks:** `PAYMENT.CAPTURE.COMPLETED` credits the Wallet. Handlers are idempotent on the PayPal resource id.
 - Per-call money never touches PayPal; it lives on the ledger.
-- Payouts and Invoicing are part of the design but **not built** (see above). The PayPal Agent Toolkit is **not** used in this codebase.
+- **Payouts:** sellers withdraw their ledger earnings to PayPal through the Payouts API (sandbox).
+- Invoicing is part of the design but **not built** (see above). The PayPal Agent Toolkit is **not** used in this codebase.
 
 ## Stack
 

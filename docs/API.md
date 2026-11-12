@@ -11,7 +11,7 @@ Amounts are always **integer micro-USD as strings** (`"2000"` = $0.002), so Java
 | Caller | How |
 |---|---|
 | Agent | `Authorization: Bearer pk_agent_<secret>`: an agent **Key** created in the Wallet or Org console. Piko stores only a hash plus the visible prefix. |
-| Seller upstream | No auth from Piko by default. Optionally, a seller sets a shared secret that Piko sends as `X-Piko-Secret` so their API can reject direct traffic. |
+| Seller upstream | No auth from Piko by default. Optionally, a seller sets a shared secret that Piko sends as `X-Piko-Secret` so their API can reject direct traffic. Any `X-Piko-Secret` a caller sends is dropped. The sample seller APIs under `${APP_BASE_URL}/api/demo/sellers/` get `DEMO_UPSTREAM_SECRET` (§6); no other upstream ever does. |
 | Dashboard | Session cookie (persona switcher in demo mode, email + password otherwise). |
 | PayPal webhooks | PayPal signature, checked with `PAYPAL_WEBHOOK_ID` through PayPal's verify-webhook-signature API. |
 
@@ -82,6 +82,8 @@ The price shown is already the buyer org's **enterprise rate** if one exists.
 **$0 endpoints.** An endpoint priced at 0 never gets a 402, so a Challenge always has a positive amount. The gateway forwards every request like a free Call, with no quota. With a Key it records a `free` Call of amount 0 (no Ledger entries); with no Key it forwards without recording a Call, since there is no buyer to record it against. A failed upstream returns `502 upstream_failed` with `refunded: false`.
 
 **Upstream redirects.** The gateway does not follow upstream redirects, and it never passes the seller's base URL back. A `Location` or `Content-Location` under the listing's base URL is rewritten to the matching root-relative `/g/{seller}/...` path; one elsewhere on the upstream's origin is dropped; one on another origin passes through unchanged.
+
+**Upstream response headers.** The gateway answers on the app's own origin, so a seller's response must not act there. It drops any `Set-Cookie` from the upstream (a seller can never set or overwrite a Piko cookie) and sets `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox` on every proxied response, replacing any the seller sent, so an HTML body can't run scripts as Piko.
 
 **Challenge cleanup.** About one 402 in ten also deletes up to 100 Challenges that expired over 5 minutes ago and were never reserved (and that no Call or Approval references). Within those 5 minutes a late payment still gets `410 challenge_expired`; after that the nonce is unknown.
 
@@ -171,6 +173,8 @@ The gateway never issues a $0 Challenge (a $0 endpoint is forwarded free, see §
 
 `POST /api/pay` must see the challenge before the funds check, so a stale nonce gets 410 even with an empty wallet.
 
+The gateway (`/g/{seller}/{path}`) and the facilitator's `verify` and `settle` also answer an unexpected failure with `500 internal_error` in this error body, logging the cause on the server. For the facilitator this is the one answer that is not an x402 response.
+
 An autopay gateway request (§2) returns the `/api/pay` errors above, plus these for `Idempotency-Key`:
 
 | Status | `code` | Meaning | Details |
@@ -213,7 +217,7 @@ An autopay gateway request (§2) returns the `/api/pay` errors above, plus these
 | `POST /api/demo/sellers/review-summariser/summarise` | Review Summariser sample API (Priya Labs); Gemini summarises the reviews via `lib/llm` |
 | `POST /api/demo/sellers/cheap-reviews/summarise` | Cheap Reviews sample API (DataCorp); same request and response as Review Summariser, but a terser prompt that reads only the first 5 reviews |
 
-These are the upstreams the seeded listings point at (SEED_DATA.md §3); buyers reach them through `/g/{seller}/…`.
+These are the upstreams the seeded listings point at (SEED_DATA.md §3); buyers reach them through `/g/{seller}/…`. They answer only the gateway: each checks `X-Piko-Secret` against `DEMO_UPSTREAM_SECRET` (in constant time) before doing anything, and a request without it, or with a wrong value, gets `401 unauthorized` in the standard error body (§4), so nobody can spend the Gemini or Channel3 free tier by calling them directly. The gateway sends that secret only to upstream URLs under `${APP_BASE_URL}/api/demo/sellers/` (same scheme, host and port), never to another seller.
 
 Product Search returns `{ "products": [...], "source": "channel3" | "fallback" }`. Its Channel3 API key stays server-side. Price History returns `{ "productId": "…", "currency": "USD", "history": [{ "date": "YYYY-MM-DD", "priceMicroUsd": "…" }] }`; the fixed window and integer micro-USD values are deterministic for each product ID.
 

@@ -14,9 +14,10 @@ import {
   memberships,
   orgs,
 } from "../db/schema";
+import { findPersona, PERSONAS } from "../auth/accounts";
 import { authenticateKey } from "../keys";
 import { balanceOf } from "../ledger";
-import { PRIYA_SEED_BALANCE_MICRO, seed } from "./index";
+import { ACME_CREDIT_LIMIT_MICRO, PRIYA_SEED_BALANCE_MICRO, seed } from "./index";
 
 const url = inject("testDatabaseUrl");
 
@@ -110,7 +111,7 @@ describe.skipIf(!url)("seed", () => {
     const { samKey } = await seed(db, { appBaseUrl });
     const state = await snapshot();
 
-    expect(state.orgs.map((org) => org.slug)).toEqual(["datacorp", "priya", "sam"]);
+    expect(state.orgs.map((org) => org.slug)).toEqual(["acme", "datacorp", "priya", "sam"]);
     expect(state.agents).toEqual([{ org: "sam", name: "shopping-assistant", teamId: null }]);
     expect(state.keyCount).toBe(1);
     expect(state.listings.map(({ slug, seller }) => [slug, seller])).toEqual([
@@ -161,6 +162,38 @@ describe.skipIf(!url)("seed", () => {
 
     const [sam] = await db.select().from(orgs).where(eq(orgs.slug, "sam"));
     expect(await balanceOf(db, { type: "wallet", orgId: sam!.id })).toBe(0n);
+  });
+
+  it("creates Dana as admin of Acme Corp, an invoiced company with a $500 credit limit", async () => {
+    await seed(db, { appBaseUrl });
+    const state = await snapshot();
+
+    expect(state.orgs.find((org) => org.slug === "acme")).toEqual({
+      name: "Acme Corp",
+      slug: "acme",
+      kind: "company",
+      billing: "invoiced",
+      creditLimitMicro: ACME_CREDIT_LIMIT_MICRO,
+    });
+    expect(ACME_CREDIT_LIMIT_MICRO).toBe(500_000_000n);
+    expect(state.accounts).toContainEqual({ email: "dana@acme.demo", name: "Dana" });
+    expect(state.memberships).toContainEqual({ org: "acme", role: "admin" });
+
+    const dana = await findPersona(db, "dana@acme.demo");
+    expect(dana).toMatchObject({ org: { slug: "acme" }, role: "admin", area: "org" });
+  });
+
+  it("gives every persona on the switcher an account to log in as", async () => {
+    await seed(db, { appBaseUrl });
+    const areas = await Promise.all(
+      PERSONAS.map(async ({ email }) => [email, (await findPersona(db, email))?.area]),
+    );
+    expect(areas).toEqual([
+      ["sam@demo.piko", "wallet"],
+      ["dana@acme.demo", "org"],
+      ["priya@demo.piko", "seller"],
+      ["omar@datacorp.demo", "seller"],
+    ]);
   });
 
   it("leaves the same state when run twice, and invalidates the earlier key", async () => {

@@ -186,7 +186,7 @@ describe.skipIf(!url)("Policies", () => {
     expect(await errorOf(res)).toMatchObject({ code: "policy_denied", rule: "max_price_per_call" });
   });
 
-  it("denies a payment over an approval threshold until approvals exist (P5-04)", async () => {
+  it("asks for an approval over an approval threshold (P5-04)", async () => {
     const b = await buyer();
     await createPolicy(db, {
       orgId: b.orgId,
@@ -198,9 +198,10 @@ describe.skipIf(!url)("Policies", () => {
       confirmed: true,
     });
     const seller = await cheapReviews(3_000n);
-    const res = await pay(b.rawKey, await challenge(seller, b.rawKey));
-    expect(res.status).toBe(403);
-    expect(await errorOf(res)).toMatchObject({ code: "policy_denied", rule: "approval_above" });
+    const nonce = await challenge(seller, b.rawKey);
+    const res = await pay(b.rawKey, nonce);
+    expect(res.status).toBe(202);
+    expect(await errorOf(res)).toMatchObject({ code: "approval_pending", nonce, amount: "3000" });
   });
 
   it("stores the scope as an id and turns budget rules into Budgets on confirm", async () => {

@@ -2,6 +2,9 @@
 
 **Piko makes PayPal the default way AI agents pay, and get paid.**
 
+- **Live demo:** https://piko-pay.onrender.com (open `/login` and pick a persona; the free instance can take about a minute to wake)
+- **Demo video:** https://youtu.be/LYvDuZjMHow
+
 Piko has two sides on one ledger:
 
 - **Wallet (buyers):** an agent gets a Key, a PayPal-funded balance and Budgets. Solo developers use the Wallet; companies use the Org console.
@@ -55,7 +58,7 @@ These are not on main, so do not expect them in the demo:
 - **Approvals** for calls over a policy threshold, and the **plain-English policy compiler** (Gemini compiling text into a policy). Policies are evaluated, but there is no screen to write or confirm them.
 - **Seller analytics** and the **live earnings** view.
 - **AI pricing assistant** and **enterprise rates**.
-- **Full demo seed** and **live simulated traffic**: `npm run seed` loads a minimal demo world only (personas, orgs, four sample listings).
+- **Live simulated traffic** (a generator that keeps writing simulated Calls while you watch). `npm run seed` loads the full demo world, including about 12,000 historical Calls labelled "simulated".
 - The webhook handler only acts on `PAYMENT.CAPTURE.COMPLETED` (top-ups). Other event types are stored and ignored.
 
 ## How PayPal is used
@@ -99,7 +102,7 @@ Requirements: Node 24 or newer (`.node-version`), npm, Postgres with the pgvecto
    ```sh
    npm install
    npm run db:migrate   # apply migrations to DATABASE_URL
-   npm run seed         # reset the database to the demo world (prints Sam's agent Key once)
+   npm run seed         # reset the database to the demo world: 12,000 simulated Calls (`-- --calls=2000` for fewer, `-- --calls=0` for none). Prints Sam's agent Key once
    npm run dev          # http://localhost:3000
    ```
 

@@ -15,10 +15,17 @@ import { gatewayConfigFromEnv, handleGatewayRequest } from "../gateway";
 import { AUTOPAY_HEADER } from "../gateway/forward";
 import { findRoute } from "../gateway/route";
 import { balanceOf } from "../ledger";
-import { formatUsd } from "../money";
+import { formatUsd, parseUsd } from "../money";
 
 /** Where the agent's answers stop being useful: a model doesn't need a megabyte of JSON. */
 const MAX_BODY_CHARS = 4000;
+
+/** The product the agent settled on. The playground offers it as a PayPal checkout. */
+export interface Recommendation {
+  name: string;
+  priceMicro: bigint;
+  url?: string;
+}
 
 export interface AgentToolContext {
   /** The agent's own Key. It stays server-side and is never shown to the model. */
@@ -26,11 +33,12 @@ export interface AgentToolContext {
   baseUrl: string;
   taskBudgetMicro: bigint;
   /**
-   * What this task has paid, and what calls still in flight have set aside. The tools update
-   * both. A call reserves its price before it awaits anything, so parallel tool calls from one
-   * model step can't all pass the budget check on the same remaining amount.
+   * What this task has paid, what calls still in flight have set aside, and what the agent
+   * finally recommended. The tools update it. A call reserves its price before it awaits
+   * anything, so parallel tool calls from one model step can't all pass the budget check on the
+   * same remaining amount.
    */
-  state: { spentMicro: bigint; reservedMicro: bigint };
+  state: { spentMicro: bigint; reservedMicro: bigint; recommendation?: Recommendation };
   search(query: string, limit: number): ReturnType<typeof searchDirectory>;
   /** The list price of an endpoint, or null if there is no such endpoint. */
   lookupPrice(seller: string, method: string, path: string): Promise<bigint | null>;
@@ -66,11 +74,11 @@ export function createToolContext(input: {
 const usd = (micro: bigint) => formatUsd(micro);
 
 /** Spent plus reserved: what the task has committed, settled or not. */
-function committed(ctx: AgentToolContext): bigint {
+export function committed(ctx: AgentToolContext): bigint {
   return ctx.state.spentMicro + ctx.state.reservedMicro;
 }
 
-function remaining(ctx: AgentToolContext): bigint {
+export function remaining(ctx: AgentToolContext): bigint {
   const left = ctx.taskBudgetMicro - committed(ctx);
   return left > 0n ? left : 0n;
 }
@@ -177,6 +185,31 @@ export function createAgentTools(ctx: AgentToolContext) {
           return { ...fail(code, errorMessage(text) ?? `HTTP ${response.status}`), ...cost(paid) };
         }
         return { ok: true as const, status: response.status, body: parseBody(text), ...cost(paid) };
+      },
+    }),
+
+    recommend_product: tool({
+      description:
+        "Call this once, at the end, with the single product you recommend buying. The buyer " +
+        "will be offered a checkout for it. Only recommend a product you saw in the results.",
+      inputSchema: z.object({
+        name: z.string().min(1).max(200),
+        priceUsd: z.string().describe("The price in dollars as a plain number, e.g. 249.99."),
+        url: z.string().optional().describe("The product link from the search results."),
+      }),
+      execute: async ({ name, priceUsd, url }) => {
+        let priceMicro: bigint;
+        try {
+          priceMicro = parseUsd(priceUsd);
+        } catch {
+          return fail("invalid_price", `"${priceUsd}" isn't a dollar amount like 249.99.`);
+        }
+        // A checkout is in whole cents, so a price PayPal couldn't charge isn't accepted.
+        if (priceMicro <= 0n || priceMicro % 10_000n !== 0n) {
+          return fail("invalid_price", "Give a price in dollars and cents, like 249.99.");
+        }
+        ctx.state.recommendation = { name, priceMicro, url };
+        return { ok: true as const, ...cost(0n) };
       },
     }),
 

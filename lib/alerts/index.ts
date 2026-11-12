@@ -12,11 +12,11 @@ import type { Db } from "../db/client";
 import { agents, alerts } from "../db/schema";
 import type { DbOrTx } from "../ledger";
 import { formatUsd } from "../money";
-import { BUDGET_ALERT_TYPE, type AlertView } from "./types";
+import { BUDGET_ALERT_TYPE, POLICY_ALERT_TYPE, type AlertView } from "./types";
 
 export * from "./types";
 
-/** A looping Agent hitting one cap writes one alert per this many seconds, not one per try. */
+/** A looping Agent hitting one cap or Policy writes one alert per this many seconds, not one per try. */
 export const BUDGET_ALERT_DEDUP_SECONDS = 600;
 
 /** Holds the ISO time this browser last marked the org's alerts read. */
@@ -130,17 +130,49 @@ export async function recordBudgetAlert(
   db: Db,
   input: { orgId: string; agentId: string; budget: BudgetState },
 ): Promise<boolean> {
-  const { orgId, agentId, budget } = input;
+  const { budget } = input;
+  return recordDedupedAlert(
+    db,
+    input,
+    BUDGET_ALERT_TYPE,
+    (agent) =>
+      `${agent} hit the ${budget.scope} budget of ${formatUsd(budget.maxMicro)} ` +
+      `${PER[budget.period]}${budget.category ? ` on ${budget.category}` : ""}. Payments over it are blocked.`,
+  );
+}
+
+/**
+ * Writes a `policy_denied` alert for a payment a Policy blocked, deduplicated like
+ * {@link recordBudgetAlert}. Returns whether it wrote one.
+ */
+export async function recordPolicyAlert(
+  db: Db,
+  input: { orgId: string; agentId: string; policyName: string; reason: string },
+): Promise<boolean> {
+  return recordDedupedAlert(
+    db,
+    input,
+    POLICY_ALERT_TYPE,
+    (agent) => `${agent} was blocked by the policy "${input.policyName}". ${input.reason}`,
+  );
+}
+
+/** Writes an alert unless the same Agent got the same one within the dedup window. */
+async function recordDedupedAlert(
+  db: Db,
+  input: { orgId: string; agentId: string },
+  type: string,
+  messageFor: (agentName: string) => string,
+): Promise<boolean> {
+  const { orgId, agentId } = input;
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`alert:budget:${agentId}`}))`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`alert:${type}:${agentId}`}))`);
     const [agent] = await tx
       .select({ name: agents.name })
       .from(agents)
       .where(and(eq(agents.id, agentId), eq(agents.orgId, orgId)));
     if (!agent) return false;
-    const message =
-      `${agent.name} hit the ${budget.scope} budget of ${formatUsd(budget.maxMicro)} ` +
-      `${PER[budget.period]}${budget.category ? ` on ${budget.category}` : ""}. Payments over it are blocked.`;
+    const message = messageFor(agent.name);
     const [recent] = await tx
       .select({ id: alerts.id })
       .from(alerts)
@@ -148,7 +180,7 @@ export async function recordBudgetAlert(
         and(
           eq(alerts.orgId, orgId),
           eq(alerts.agentId, agentId),
-          eq(alerts.type, BUDGET_ALERT_TYPE),
+          eq(alerts.type, type),
           eq(alerts.message, message),
           gt(
             alerts.createdAt,
@@ -158,7 +190,7 @@ export async function recordBudgetAlert(
       )
       .limit(1);
     if (recent) return false;
-    await tx.insert(alerts).values({ orgId, agentId, type: BUDGET_ALERT_TYPE, message });
+    await tx.insert(alerts).values({ orgId, agentId, type, message });
     return true;
   });
 }

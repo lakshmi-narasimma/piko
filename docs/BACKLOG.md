@@ -244,7 +244,7 @@ Covers part of TEST_PLAN **F10**.
   - **Done when:** A new listing's `/g/<slug>/…` URL returns 402, and a private IP is refused.
   - **Depends on:** P1-10, P3-01
 
-- [ ] **P4-02 Harden the gateway proxy** · `core` · S
+- [x] **P4-02 Harden the gateway proxy** · `core` · S
   - **Goal:** Forward the method, query and body; strip Piko and hop-by-hop headers; add a body size limit; and give a clear error when upstream is unreachable.
   - **Done when:** Tests cover a GET with a query, a POST with JSON, and a body that's too large.
   - **Depends on:** P4-01
@@ -274,7 +274,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** The F5 agent-budget and team-budget items pass.
   - **Depends on:** P1-09
 
-- [ ] **P5-03 Policy schema and evaluator** · `core` · M
+- [x] **P5-03 Policy schema and evaluator** · `core` · M
   - **Goal:** A zod schema for policies ([DESIGN.md §9](DESIGN.md#9-policy-engine-budgets-and-circuit-breaker)) and a deterministic evaluator in `lib/policy`: vendor block and allow, max price per call, and approval above an amount. A denial returns 403 `policy_denied` naming the policy. Checks run in the order §9 gives.
   - **Done when:** The F5 vendor-block item passes, and unit tests cover each rule type.
   - **Depends on:** P5-02
@@ -344,7 +344,7 @@ Covers TEST_PLAN **F7** and the rest of **F10**. With this phase done, the demo 
 ## Phase 7: Org invoicing
 Covers TEST_PLAN **F8**.
 
-- [ ] **P7-01 Work out the invoice** · `core` · S
+- [x] **P7-01 Work out the invoice** · `core` · S
   - **Goal:** From the ledger, an org's spend for a period, with one line per team.
   - **Done when:** The total equals the org's ledger debits for the period in tests.
   - **Depends on:** P5-02

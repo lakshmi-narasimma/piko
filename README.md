@@ -99,7 +99,7 @@ Requirements: Node 24 or newer (`.node-version`), npm, Postgres with the pgvecto
    ```sh
    npm install
    npm run db:migrate   # apply migrations to DATABASE_URL
-   npm run seed         # reset the database to the demo world (prints Sam's agent Key once)
+   npm run seed         # reset the database to the demo world: 12,000 simulated Calls (`-- --calls=2000` for fewer, `-- --calls=0` for none). Prints Sam's agent Key once
    npm run dev          # http://localhost:3000
    ```
 

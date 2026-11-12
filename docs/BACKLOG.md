@@ -394,9 +394,10 @@ Covers TEST_PLAN **F3**, **F11**, and the rest of **F2** and **F10**.
 ## Phase 9: Polish and ship
 Covers TEST_PLAN **F12**, **F13** and the [SUBMISSION.md](SUBMISSION.md) checklist.
 
-- [ ] **P9-01 Full demo seed** · `core` · L
+- [x] **P9-01 Full demo seed** · `core` · L
   - **Goal:** All of [SEED_DATA.md](SEED_DATA.md): Acme's teams, agents and policies; about 12,000 simulated Calls from a fixed random seed; DataCorp at $12.40; Acme at $183 this month.
   - **Done when:** Running the seed twice gives identical dashboards, and every seeded Call has `simulated = true`.
+  - **Left out on purpose:** (1) The "anything over 5 cents a call needs my OK" half of Acme's first policy: it is an `approval_above` rule, approvals (P5-04) aren't built, and on main a matching `approval_above` denies the Call. Only its $50/month search budget is seeded; add the rule when P5-04 lands. (2) Acme at **$183** this month: 12,000 Calls at these prices can't reach it, so Acme's month-to-date is whatever the history adds up to. (3) History covers the 29 UTC days before today, so timestamps are anchored to midnight and two runs on the same day are identical; a Call from "today" isn't seeded. (4) No `breaker` freeze is left in place (the demo trips it live): only the alert from 9 days ago. (5) Seller history already "paid out" is simulated: a `seed` Ledger entry pins Priya at $0.94 and DataCorp at $12.40, and no fake PayPal Payout row exists.
   - **Depends on:** Phases 1–7
 
 - [ ] **P9-02 Live simulated traffic** · `core` `ui` · S

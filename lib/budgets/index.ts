@@ -8,9 +8,10 @@
  * payments from both slipping under the cap: reserveFunds runs the check under the buyer
  * org's lock, after every earlier hold has committed.
  *
- * Periods are UTC. A Call counts in the period of its `calls.created_at`, and so does its
+ * Periods are UTC, and the current one is found with the database clock, which also sets
+ * `calls.created_at`. A Call counts in the period of its `created_at`, and so does its
  * refund. A `task` Budget counts everything since the Budget was created: a new task starts
- * when the Budget is saved again (docs/decisions/0013-task-budgets.md).
+ * when its cap is changed (docs/decisions/0013-task-budgets.md).
  */
 import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import {
@@ -99,6 +100,26 @@ export function periodWindow(
   }
 }
 
+/**
+ * The current period by the database clock, so that its edges agree with
+ * `calls.created_at` (set by `now()`). Inside a transaction `now()` is its start time.
+ */
+async function currentWindow(
+  db: DbOrTx,
+  period: BudgetPeriod,
+  budgetCreatedAt: Date,
+): Promise<{ from: Date; to: Date | null }> {
+  if (period === "task") return { from: budgetCreatedAt, to: null };
+  const unit = sql.raw(period === "day" ? "'day'" : "'month'");
+  const step = sql.raw(period === "day" ? "interval '1 day'" : "interval '1 month'");
+  const result = await db.execute<{ from: Date; to: Date }>(sql`
+    select date_trunc(${unit}, now() at time zone 'UTC') at time zone 'UTC' as "from",
+           (date_trunc(${unit}, now() at time zone 'UTC') + ${step}) at time zone 'UTC' as "to"
+  `);
+  const row = result.rows[0]!;
+  return { from: new Date(row.from), to: new Date(row.to) };
+}
+
 const sameCategory = (column: typeof listings.category, category: string) =>
   sql`lower(${column}) = lower(${category})`;
 
@@ -155,10 +176,12 @@ function scopeFilter(budget: BudgetRow, agentColumn: AnyPgColumn) {
 async function stateOf(
   db: DbOrTx,
   budget: BudgetRow,
-  at: Date,
+  at: Date | undefined,
   excludeNonce: string | undefined,
 ): Promise<BudgetState> {
-  const { from, to } = periodWindow(budget.period, at, budget.createdAt);
+  const { from, to } = at
+    ? periodWindow(budget.period, at, budget.createdAt)
+    : await currentWindow(db, budget.period, budget.createdAt);
   const category = budget.category;
 
   // Wallet entries are debits (negative) for Calls and credits for their refunds.
@@ -228,9 +251,8 @@ export async function budgetStates(
   spender: Spender,
   options: { at?: Date } = {},
 ): Promise<BudgetState[]> {
-  const at = options.at ?? new Date();
   const rows = await coveringBudgets(db, spender);
-  return Promise.all(rows.map((row) => stateOf(db, row, at, undefined)));
+  return Promise.all(rows.map((row) => stateOf(db, row, options.at, undefined)));
 }
 
 export interface EnforceBudgetsInput extends Spender {
@@ -238,7 +260,7 @@ export interface EnforceBudgetsInput extends Spender {
   amountMicro: bigint;
   /** The Challenge being paid. Its own hold, if it has one already, isn't counted again. */
   nonce?: string;
-  /** When the payment happens; picks the day or month. Defaults to now. */
+  /** When the payment happens; picks the day or month. Defaults to the database's now(). */
   at?: Date;
 }
 
@@ -256,9 +278,8 @@ export async function enforceBudgets(db: DbOrTx, input: EnforceBudgetsInput): Pr
     .innerJoin(listings, eq(listings.id, endpoints.listingId))
     .where(eq(endpoints.id, input.endpointId));
   const rows = await coveringBudgets(db, input, listing?.category ?? null);
-  const at = input.at ?? new Date();
   for (const row of rows) {
-    const state = await stateOf(db, row, at, input.nonce);
+    const state = await stateOf(db, row, input.at, input.nonce);
     if (input.amountMicro > state.remainingMicro) {
       throw new BudgetExceededError(state, input.amountMicro);
     }

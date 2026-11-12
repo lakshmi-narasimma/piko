@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import {
   createBuyer,
@@ -321,6 +321,35 @@ describe.skipIf(!url)("Budgets", () => {
       month: 320_000n,
     });
     expect(await spent(new Date("2026-05-01T00:00:00Z"))).toEqual({ day: 0n, month: 0n });
+  });
+
+  it("finds the current day and month with the database clock", async () => {
+    const who = await buyer();
+    for (const period of ["day", "month"] as const) {
+      await budget({
+        orgId: who.orgId,
+        scopeType: "agent",
+        scopeId: who.agentId,
+        period,
+        maxMicro: DOLLAR,
+      });
+    }
+    const { rows } = await db.execute<{ now: Date }>(sql`select now() as now`);
+    const dbNow = new Date(rows[0]!.now);
+    // A JS clock a day ahead of the database must not move the window.
+    vi.useFakeTimers({ now: dbNow.getTime() + 86_400_000, toFake: ["Date"] });
+    try {
+      const states = await budgetStates(db, who);
+      const byPeriod = Object.fromEntries(
+        states.map((s) => [s.period, { from: s.from, to: s.to }]),
+      );
+      expect(byPeriod).toEqual({
+        day: periodWindow("day", dbNow, dbNow),
+        month: periodWindow("month", dbNow, dbNow),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("applies a category budget only to Listings in that category", async () => {

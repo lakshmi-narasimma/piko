@@ -304,7 +304,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** A breaker trip shows as an alert within a few seconds.
   - **Depends on:** P5-06
 
-- [ ] **P5-09 Spend grid and audit export** · `ui` · M
+- [x] **P5-09 Spend grid and audit export** · `ui` · M
   - **Goal:** An AG Grid of spend by team, agent, vendor and day, with grouping and CSV export. Simulated rows are labelled.
   - **Done when:** It handles 12,000 rows smoothly (seed a test set), and the CSV downloads.
   - **Depends on:** P5-01

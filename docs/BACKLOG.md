@@ -344,7 +344,7 @@ Covers TEST_PLAN **F7** and the rest of **F10**. With this phase done, the demo 
 ## Phase 7: Org invoicing
 Covers TEST_PLAN **F8**.
 
-- [ ] **P7-01 Work out the invoice** · `core` · S
+- [x] **P7-01 Work out the invoice** · `core` · S
   - **Goal:** From the ledger, an org's spend for a period, with one line per team.
   - **Done when:** The total equals the org's ledger debits for the period in tests.
   - **Depends on:** P5-02

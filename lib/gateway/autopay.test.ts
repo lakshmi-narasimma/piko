@@ -195,6 +195,37 @@ describe.skipIf(!url)("gateway: X-Piko-Autopay", () => {
     expect(await availableFunds(db, buyer.orgId)).toBe(10_000n);
   });
 
+  it("returns 429 and forwards nothing when the payment trips the circuit breaker", async () => {
+    const seller = await createSeller(db, upstream.url);
+    const buyer = await createBuyer(db, 10_000n);
+    const breaker = { maxCalls: 1, windowSeconds: 10, maxMicroPerMinute: 1_000_000n };
+    const send = () =>
+      handleGatewayRequest(
+        { db, config, breaker },
+        gatewayRequest("GET", `https://piko.test/g/${seller.slug}/history`, {
+          key: buyer.rawKey,
+          headers: { "X-Piko-Autopay": "true" },
+        }),
+        { seller: seller.slug, path: ["history"] },
+      );
+
+    expect((await send()).status).toBe(200);
+    const before = upstream.requests.length;
+    const tripped = await send();
+
+    expect(tripped.status).toBe(429);
+    expect(await errorOf(tripped)).toMatchObject({ code: "breaker_tripped", reason: "calls" });
+    expect(upstream.requests.length).toBe(before);
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(8_000n);
+    expect(await availableFunds(db, buyer.orgId)).toBe(8_000n);
+    const [agent] = await db
+      .select({ frozenAt: agents.frozenAt })
+      .from(agents)
+      .where(eq(agents.id, buyer.agentId));
+    expect(agent!.frozenAt).toBeInstanceOf(Date);
+    expect((await send()).status).toBe(423);
+  });
+
   it("treats any value but true as a normal request", async () => {
     const seller = await createSeller(db, upstream.url);
     const buyer = await createBuyer(db, 10_000n);

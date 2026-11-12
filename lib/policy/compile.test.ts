@@ -12,8 +12,9 @@ import {
   TEST_GATEWAY_CONFIG as config,
 } from "../../test/gateway-fixtures";
 import { createDb, type Db } from "../db/client";
-import { agents, budgets, listings, policies, teams } from "../db/schema";
+import { agents, budgets, calls, listings, policies, teams } from "../db/schema";
 import { handleGatewayRequest } from "../gateway";
+import { postCall } from "../ledger";
 import { createLlm } from "../llm";
 import { handlePayRequest } from "../pay";
 import type { Actor } from "../org";
@@ -123,6 +124,29 @@ describe.skipIf(!url)("Policy compiler", () => {
     return result.message;
   }
 
+  /** A settled Call, so the Agent has already spent something today. */
+  async function spend(
+    who: { orgId: string; agentId: string },
+    to: { orgId: string; endpointId: string },
+    amountMicro: bigint,
+  ) {
+    const callId = randomUUID();
+    await db.insert(calls).values({
+      id: callId,
+      agentId: who.agentId,
+      buyerOrgId: who.orgId,
+      endpointId: to.endpointId,
+      amountMicro,
+      status: "paid",
+    });
+    await postCall(db, {
+      callId,
+      buyerOrgId: who.orgId,
+      sellerOrgId: to.orgId,
+      priceMicro: amountMicro,
+    });
+  }
+
   async function pay(key: string, seller: { slug: string }) {
     const res = await handleGatewayRequest(
       { db, config },
@@ -142,7 +166,8 @@ describe.skipIf(!url)("Policy compiler", () => {
 
   it("F5: 'Support agents can spend at most $10 a day' compiles to a Support budget that is not enforced until Confirm", async () => {
     const a = await acme();
-    const seller = await createSeller(db, UPSTREAM, { priceMicro: 6n * DOLLAR });
+    const seller = await createSeller(db, UPSTREAM, { priceMicro: 20_000n });
+    await spend(a, seller, 9_990_000n);
     const text = "Support agents can spend at most $10 a day";
 
     const { result } = await compile(a, text, SUPPORT_BUDGET);
@@ -156,11 +181,10 @@ describe.skipIf(!url)("Policy compiler", () => {
       readable: ["Applies to: the Support team", "Blocks spending above $10.00 per day"],
       resolved: { scopeLabel: "the Support team" },
     });
-    // Nothing saved, nothing enforced: $12 of Calls pass a $10 cap that doesn't exist yet.
+    // Nothing saved, nothing enforced: a Call that takes the day past $10 still passes.
     expect(await countPolicies(a.orgId)).toBe(0);
     expect(await countBudgets(a.orgId)).toBe(0);
     expect(await loadPolicies(db, a.orgId)).toEqual([]);
-    expect((await pay(a.rawKey, seller)).status).toBe(200);
     expect((await pay(a.rawKey, seller)).status).toBe(200);
 
     if (!result.ok) return;
@@ -193,7 +217,9 @@ describe.skipIf(!url)("Policy compiler", () => {
     });
 
     expect(expectFailure(result, "unclear")).toBe(COULD_NOT_COMPILE_MESSAGE);
-    expect(COULD_NOT_COMPILE_MESSAGE).toMatch(/^I couldn't turn that into a rule\. Try something like: /);
+    expect(COULD_NOT_COMPILE_MESSAGE).toMatch(
+      /^I couldn't turn that into a rule\. Try something like: /,
+    );
     expect(await countPolicies(a.orgId)).toBe(0);
     expect(await countBudgets(a.orgId)).toBe(0);
   });
@@ -404,7 +430,10 @@ describe.skipIf(!url)("Policy compiler", () => {
       const other = await acme();
       const swapped = { ...document, scope: { team: other.teamId } };
 
-      const result = await confirmCompiledPolicy(db, a.admin, { sourceText: text, document: swapped });
+      const result = await confirmCompiledPolicy(db, a.admin, {
+        sourceText: text,
+        document: swapped,
+      });
 
       expect(result).toMatchObject({ ok: false, reason: "unknown_scope" });
       expect(await countPolicies(a.orgId)).toBe(0);
@@ -417,14 +446,20 @@ describe.skipIf(!url)("Policy compiler", () => {
       const bad: unknown[] = [
         { ...document, scope: { team: "Nope" } },
         { scope: { team: "Support" }, rules: [{ type: "budget", period: "day", maxMicroUsd: -1 }] },
-        { scope: { team: "Support" }, rules: [{ type: "budget", period: "day", maxMicroUsd: "1e9" }] },
+        {
+          scope: { team: "Support" },
+          rules: [{ type: "budget", period: "day", maxMicroUsd: "1e9" }],
+        },
         { scope: { team: "Support" }, rules: [], orgId: randomUUID() },
         { scope: { team: "Support" } },
         "not a document",
         null,
       ];
       for (const doc of bad) {
-        const result = await confirmCompiledPolicy(db, a.admin, { sourceText: text, document: doc });
+        const result = await confirmCompiledPolicy(db, a.admin, {
+          sourceText: text,
+          document: doc,
+        });
         expect(result.ok).toBe(false);
       }
       for (const sourceText of ["", "   ", "x".repeat(501), 5, null]) {
@@ -461,7 +496,10 @@ describe.skipIf(!url)("Policy compiler", () => {
         scope: document.scope,
         rules: [{ type: "budget", period: "day", maxMicroUsd: 5_000_000 }],
       };
-      const result = await confirmCompiledPolicy(db, a.admin, { sourceText: text, document: stricter });
+      const result = await confirmCompiledPolicy(db, a.admin, {
+        sourceText: text,
+        document: stricter,
+      });
       expect(result).toMatchObject({ ok: true, alreadyConfirmed: false });
       expect(await countPolicies(a.orgId)).toBe(2);
     });

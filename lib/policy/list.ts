@@ -17,7 +17,12 @@ export interface PolicySummary {
 
 export async function listPolicies(db: Db, orgId: string): Promise<PolicySummary[]> {
   const [rows, teamRows, agentRows] = await Promise.all([
-    db.select().from(policies).where(eq(policies.orgId, orgId)).orderBy(desc(policies.createdAt)).limit(50),
+    db
+      .select()
+      .from(policies)
+      .where(eq(policies.orgId, orgId))
+      .orderBy(desc(policies.createdAt))
+      .limit(50),
     db.select({ id: teams.id, name: teams.name }).from(teams).where(eq(teams.orgId, orgId)),
     db.select({ id: agents.id, name: agents.name }).from(agents).where(eq(agents.orgId, orgId)),
   ]);

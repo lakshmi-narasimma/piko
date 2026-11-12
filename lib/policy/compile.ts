@@ -28,7 +28,8 @@ import {
 
 export const MAX_POLICY_TEXT_LENGTH = 500;
 
-export type CompileFailureReason = "unclear" | "unsupported" | "unknown_scope" | "too_long" | "busy";
+export type CompileFailureReason =
+  "unclear" | "unsupported" | "unknown_scope" | "too_long" | "busy";
 
 export type CompileResult =
   | {
@@ -43,10 +44,7 @@ export type CompileResult =
     }
   | { ok: false; reason: CompileFailureReason; message: string };
 
-const EXAMPLES = [
-  "Support agents can spend at most $10 a day",
-  "Nobody may use Cheap Reviews",
-];
+const EXAMPLES = ["Support agents can spend at most $10 a day", "Nobody may use Cheap Reviews"];
 
 export const COULD_NOT_COMPILE_MESSAGE = `I couldn't turn that into a rule. Try something like: "${EXAMPLES[0]}" or "${EXAMPLES[1]}".`;
 
@@ -93,10 +91,18 @@ const modelAnswerSchema = z.object({
           team: z.string().nullish(),
           agent: z.string().nullish(),
         })
-        .describe('Exactly one of {"org": true}, {"team": "<team name>"}, {"agent": "<agent name>"}'),
+        .describe(
+          'Exactly one of {"org": true}, {"team": "<team name>"}, {"agent": "<agent name>"}',
+        ),
       rules: z.array(
         z.looseObject({
-          type: z.enum(["vendor_block", "vendor_allow", "max_price_per_call", "approval_above", "budget"]),
+          type: z.enum([
+            "vendor_block",
+            "vendor_allow",
+            "max_price_per_call",
+            "approval_above",
+            "budget",
+          ]),
           vendors: z.array(z.string()).nullish(),
           maxMicroUsd: z.number().nullish().describe("Integer micro-USD: dollars times 1,000,000"),
           period: z.enum(["day", "month", "task"]).nullish(),
@@ -161,8 +167,18 @@ const CONTEXT_LIMIT = 100;
 
 async function loadContext(db: Db, orgId: string) {
   const [teamRows, agentRows, listingRows] = await Promise.all([
-    db.select({ name: teams.name }).from(teams).where(eq(teams.orgId, orgId)).orderBy(asc(teams.name)).limit(CONTEXT_LIMIT),
-    db.select({ name: agents.name }).from(agents).where(eq(agents.orgId, orgId)).orderBy(asc(agents.name)).limit(CONTEXT_LIMIT),
+    db
+      .select({ name: teams.name })
+      .from(teams)
+      .where(eq(teams.orgId, orgId))
+      .orderBy(asc(teams.name))
+      .limit(CONTEXT_LIMIT),
+    db
+      .select({ name: agents.name })
+      .from(agents)
+      .where(eq(agents.orgId, orgId))
+      .orderBy(asc(agents.name))
+      .limit(CONTEXT_LIMIT),
     db
       .select({ name: listings.name, slug: listings.slug, category: listings.category })
       .from(listings)
@@ -269,7 +285,10 @@ async function vendorWarnings(db: Db, document: PolicyDocument): Promise<string[
   );
   return [...new Set(wanted)]
     .filter((vendor) => !known.has(vendor.toLowerCase()))
-    .map((vendor) => `No listing or seller called "${vendor}" exists yet, so this part matches nothing today.`);
+    .map(
+      (vendor) =>
+        `No listing or seller called "${vendor}" exists yet, so this part matches nothing today.`,
+    );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -324,7 +343,10 @@ export async function compilePolicy(
   }
 
   if (answer.cannot_compile || !answer.rule) {
-    return failure(answer.kind === "unsupported" ? "unsupported" : "unclear", COULD_NOT_COMPILE_MESSAGE);
+    return failure(
+      answer.kind === "unsupported" ? "unsupported" : "unclear",
+      COULD_NOT_COMPILE_MESSAGE,
+    );
   }
 
   try {
@@ -391,7 +413,9 @@ export async function confirmCompiledPolicy(
     for (const row of same) {
       if (!row.confirmedAt) continue;
       try {
-        if (JSON.stringify(policyDocumentToJson(parsePolicyDocument(row.compiledJson))) === wanted) {
+        if (
+          JSON.stringify(policyDocumentToJson(parsePolicyDocument(row.compiledJson))) === wanted
+        ) {
           return { ok: true as const, policyId: row.id, alreadyConfirmed: true, readable };
         }
       } catch {

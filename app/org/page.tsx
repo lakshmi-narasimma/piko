@@ -211,8 +211,8 @@ async function OrgConsoleContent() {
         <section aria-label="Policies" className="flex flex-col gap-4">
           <h2 className="text-xl font-medium">Policies</h2>
           <p className="text-sm text-muted">
-            Write a rule in plain English. Piko compiles it into a rule you can read, and nothing
-            is enforced until you confirm it.
+            Write a rule in plain English. Piko compiles it into a rule you can read, and nothing is
+            enforced until you confirm it.
           </p>
           <PolicyCompiler />
           {savedPolicies.length > 0 && (

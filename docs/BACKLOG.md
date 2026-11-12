@@ -254,7 +254,7 @@ Covers part of TEST_PLAN **F10**.
   - **Done when:** The F9 directory item passes in the UI.
   - **Depends on:** P3-01, P2-03
 
-- [ ] **P4-04 "Connect an API" form** · `ui` · S
+- [x] **P4-04 "Connect an API" form** · `ui` · S
   - **Goal:** A seller pastes a URL, adds endpoints and prices, and publishes. Phase 6 builds the rest of the seller console.
   - **Done when:** The first F10 item passes as Priya.
   - **Depends on:** P4-01, P2-03

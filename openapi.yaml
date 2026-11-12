@@ -130,7 +130,10 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "502":
-          description: Upstream failed, timed out, or its URL was refused by the SSRF re-check; nothing was charged
+          description: |
+            The upstream answered 5xx, timed out, or its URL was refused by the SSRF re-check (code upstream_failed); nothing was charged.
+            For a paid Call, details refunded true and callId (the Call, recorded with status
+            refunded and no Ledger entries). For a free or $0 Call, refunded false and no callId.
           headers:
             PAYMENT-RESPONSE:
               schema: { type: string }

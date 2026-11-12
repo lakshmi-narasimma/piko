@@ -240,8 +240,9 @@ describe.skipIf(!url)("MCP server: /mcp/{seller}", () => {
     expect(textOf(result)).toMatch(/^upstream_failed: /);
     expect(result.structuredContent).toMatchObject({ error: { refunded: true } });
     expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
-    const paid = await db.select().from(calls).where(eq(calls.buyerOrgId, buyer.orgId));
-    expect(paid).toEqual([]);
+    // P8-01: the failed Call is recorded as refunded, with no Ledger entries.
+    const recorded = await db.select().from(calls).where(eq(calls.buyerOrgId, buyer.orgId));
+    expect(recorded.map((row) => row.status)).toEqual(["refunded"]);
   });
 
   it("passes an upstream 4xx through as a paid tool error", async () => {

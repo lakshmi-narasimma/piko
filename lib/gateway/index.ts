@@ -37,6 +37,7 @@ import { IDEMPOTENCY_KEY_HEADER, idempotentChallenge, idempotentReplay } from ".
 import { findRoute, type GatewayRoute } from "./route";
 import { checkUpstreamUrl, type LookupFn, type UpstreamUrlCheck } from "./ssrf";
 import {
+  refundPayment,
   settlePayment,
   verifyPayment,
   type PaymentFailure,
@@ -202,7 +203,8 @@ function withPaymentResponse(response: Response, settlement: SettlementResponse)
 
 /**
  * Forwards a verified payment upstream, then settles: x402's authorization flow.
- * Below a 500 the Call is paid. On a 5xx or timeout nothing is settled and the hold ends.
+ * Below a 500 the Call is paid. On a 5xx or timeout nothing is settled: the hold ends and
+ * the Call is recorded as refunded, with no Ledger entries.
  *
  * Claiming the hold is what admits the request: only one request per Receipt gets past it,
  * in any process. It also extends the hold to cover reading the body, the upstream call and
@@ -242,10 +244,21 @@ async function servePaidCall(
   }
   const result = await vetAndForward(config, route, request, body.body);
   if (!result.ok) {
-    await releaseReservation(db, claims.nonce);
+    const callId = await refundPayment(db, claims, {
+      upstreamStatus: result.status,
+      latencyMs: result.latencyMs,
+    });
+    // Settled through the facilitator meanwhile: answer like a settle that lost that race.
+    if (callId === null) {
+      return paymentRejected({
+        code: "challenge_expired",
+        message: "This Receipt has already been used or its reservation has ended.",
+      });
+    }
     return withPaymentResponse(
       jsonError(502, "upstream_failed", "The upstream API failed. Nothing was charged.", {
         refunded: true,
+        callId,
       }),
       {
         success: false,

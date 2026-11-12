@@ -1,7 +1,7 @@
 /**
- * TEMPORARY until P9-01: Acme Corp's teams, agents and budgets (docs/SEED_DATA.md §2), so
- * the Org console (P5-01) has a tree to show. P9-01 replaces this with the full demo world
- * and deletes this file.
+ * Acme Corp's teams, agents and org/team budgets (docs/SEED_DATA.md §2), so
+ * the Org console (P5-01) has a tree to show. lib/seed builds the rest of the demo world
+ * on top of it (P9-01).
  *
  * Acme Corp and Dana are created only if the seed hasn't already made them (matched on the
  * slug `acme` and the email `dana@acme.demo`), so this works with or without the main seed

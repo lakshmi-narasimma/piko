@@ -72,7 +72,7 @@ More detail: [docs/DESIGN.md](docs/DESIGN.md) · API: [docs/API.md](docs/API.md)
    ```sh
    npm install
    npm run db:migrate   # apply database migrations
-   npm run seed         # load the demo data
+   npm run seed         # load the demo world: 12,000 simulated Calls (`-- --calls=2000` for fewer, `-- --calls=0` for none)
    npm run dev          # http://localhost:3000
    ```
 5. Open http://localhost:3000.

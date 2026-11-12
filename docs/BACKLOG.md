@@ -244,7 +244,7 @@ Covers part of TEST_PLAN **F10**.
   - **Done when:** A new listing's `/g/<slug>/…` URL returns 402, and a private IP is refused.
   - **Depends on:** P1-10, P3-01
 
-- [ ] **P4-02 Harden the gateway proxy** · `core` · S
+- [x] **P4-02 Harden the gateway proxy** · `core` · S
   - **Goal:** Forward the method, query and body; strip Piko and hop-by-hop headers; add a body size limit; and give a clear error when upstream is unreachable.
   - **Done when:** Tests cover a GET with a query, a POST with JSON, and a body that's too large.
   - **Depends on:** P4-01

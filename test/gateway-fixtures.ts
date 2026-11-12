@@ -63,6 +63,8 @@ export interface RecordedRequest {
   url: string;
   headers: IncomingMessage["headers"];
   body: string;
+  /** The body exactly as received, for binary bodies. */
+  bytes: Buffer;
 }
 
 export interface StubUpstream {
@@ -90,6 +92,7 @@ export async function startStubUpstream(): Promise<StubUpstream> {
         url: req.url!,
         headers: req.headers,
         body: Buffer.concat(chunks).toString("utf8"),
+        bytes: Buffer.concat(chunks),
       };
       requests.push(recorded);
       handler(recorded, res);

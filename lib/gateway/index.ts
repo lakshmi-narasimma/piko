@@ -24,11 +24,16 @@ import type { ReceiptClaims } from "../x402/receipt";
 import { issueChallenge } from "./challenge";
 import {
   AUTOPAY_HEADER,
+  DEFAULT_MAX_BODY_BYTES,
+  DEFAULT_MAX_RESPONSE_BYTES,
   forwardUpstream,
   PROXIED_RESPONSE_HEADERS,
   readForwardableBody,
+  upstreamFailureMessage,
   upstreamSecretFor,
   upstreamUrl,
+  type ForwardableBody,
+  type UpstreamFailure,
   type UpstreamResult,
 } from "./forward";
 import { claimFreeCall, completeFreeCall, recordZeroPriceCall, releaseFreeCall } from "./free";
@@ -46,6 +51,10 @@ export interface GatewayConfig extends X402Config {
   upstreamTimeoutMs: number;
   /** How long reading the request body may take. Defaults to upstreamTimeoutMs. */
   bodyTimeoutMs?: number;
+  /** The largest request body forwarded. Defaults to DEFAULT_MAX_BODY_BYTES (1 MiB). */
+  maxBodyBytes?: number;
+  /** The largest upstream response read. Defaults to DEFAULT_MAX_RESPONSE_BYTES (5 MiB). */
+  maxResponseBytes?: number;
   /** Sent only to the sample seller APIs under `${appBaseUrl}/api/demo/sellers/`. */
   demoUpstreamSecret?: string;
   /** DNS lookup for the forward-time SSRF check. Tests pass a fake; defaults to the system's. */
@@ -74,6 +83,8 @@ export function gatewayConfigFromEnv(): GatewayConfig {
   return {
     ...x402ConfigFromEnv(env),
     upstreamTimeoutMs: env.UPSTREAM_TIMEOUT_MS,
+    maxBodyBytes: env.GATEWAY_MAX_BODY_BYTES,
+    maxResponseBytes: env.GATEWAY_MAX_RESPONSE_BYTES,
     demoUpstreamSecret: env.DEMO_UPSTREAM_SECRET,
   };
 }
@@ -105,12 +116,40 @@ function agentFrozen(agent: AuthenticatedAgent): Response {
   });
 }
 
-function bodyTimedOut(): Response {
+function maxBodyBytes(config: GatewayConfig): number {
+  return config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+}
+
+function readBody(config: GatewayConfig, request: Request): Promise<ForwardableBody> {
+  return readForwardableBody(request, bodyTimeoutMs(config), maxBodyBytes(config));
+}
+
+/** The answer to a request body that was not forwarded: too slow (408) or too large (413). */
+function bodyRejected(
+  config: GatewayConfig,
+  body: Extract<ForwardableBody, { ok: false }>,
+): Response {
+  if (body.reason === "too_large") {
+    const maxBytes = maxBodyBytes(config);
+    return jsonError(
+      413,
+      "payload_too_large",
+      `The request body is larger than the gateway's limit of ${maxBytes} bytes. Nothing was charged.`,
+      { maxBytes },
+    );
+  }
   return jsonError(
     408,
     "request_timeout",
     "The request body took too long to arrive. Nothing was charged.",
   );
+}
+
+function upstreamFailed(failure: UpstreamFailure, refunded: boolean): Response {
+  return jsonError(502, "upstream_failed", upstreamFailureMessage(failure), {
+    refunded,
+    reason: failure.reason,
+  });
 }
 
 function upstreamResponse(result: Extract<UpstreamResult, { ok: true }>): Response {
@@ -142,10 +181,11 @@ async function vetAndForward(
     console.warn(
       `Gateway refused the upstream of seller '${route.sellerSlug}' (${check.reason}); nothing charged`,
     );
-    return { ok: false, status: null, latencyMs: 0 };
+    return { ok: false, reason: "unreachable", status: null, latencyMs: 0 };
   }
   return forwardUpstream(route, request, body, {
     timeoutMs: config.upstreamTimeoutMs,
+    maxResponseBytes: config.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
     upstreamSecret: upstreamSecretFor(url, config),
   });
 }
@@ -161,17 +201,15 @@ async function serveFreeCall(
   request: Request,
   callId: string | null,
 ): Promise<Response> {
-  const body = await readForwardableBody(request, bodyTimeoutMs(config));
+  const body = await readBody(config, request);
   if (!body.ok) {
     if (callId) await releaseFreeCall(db, callId);
-    return bodyTimedOut();
+    return bodyRejected(config, body);
   }
   const result = await vetAndForward(config, route, request, body.body);
   if (!result.ok) {
     if (callId) await releaseFreeCall(db, callId);
-    return jsonError(502, "upstream_failed", "The upstream API failed. Nothing was charged.", {
-      refunded: false,
-    });
+    return upstreamFailed(result, false);
   }
   if (callId) {
     await completeFreeCall(db, callId, {
@@ -232,25 +270,20 @@ async function servePaidCall(
     });
   }
 
-  const body = await readForwardableBody(request, bodyTimeoutMs(config));
+  const body = await readBody(config, request);
   if (!body.ok) {
     await releaseReservation(db, claims.nonce);
-    return bodyTimedOut();
+    return bodyRejected(config, body);
   }
   const result = await vetAndForward(config, route, request, body.body);
   if (!result.ok) {
     await releaseReservation(db, claims.nonce);
-    return withPaymentResponse(
-      jsonError(502, "upstream_failed", "The upstream API failed. Nothing was charged.", {
-        refunded: true,
-      }),
-      {
-        success: false,
-        errorReason: "upstream_failed",
-        transaction: "",
-        network: config.network,
-      },
-    );
+    return withPaymentResponse(upstreamFailed(result, true), {
+      success: false,
+      errorReason: "upstream_failed",
+      transaction: "",
+      network: config.network,
+    });
   }
   const settlement = await settlePayment(db, config, claims, {
     upstreamStatus: result.status,

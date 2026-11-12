@@ -379,7 +379,7 @@ Covers TEST_PLAN **F3**, **F11**, and the rest of **F2** and **F10**.
   - **Done when:** The F2 enterprise-rate item passes: Acme sees $0.007 and Sam sees $0.010.
   - **Depends on:** P6-01
 
-- [ ] **P8-03 Paid MCP server** · `core` · L
+- [x] **P8-03 Paid MCP server** · `core` · L
   - **Goal:** `POST /mcp/{seller}` with the MCP TypeScript SDK. It lists a seller's endpoints as tools with prices in their descriptions, authenticates with an agent key, charges through the same pipeline, and returns `insufficient_funds` as a tool error.
   - **Done when:** Every F11 item passes in Claude Desktop or the MCP Inspector.
   - **Depends on:** P1-12

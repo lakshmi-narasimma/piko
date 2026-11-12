@@ -189,12 +189,40 @@ An autopay gateway request (§2) returns the `/api/pay` errors above, plus these
 
 ## 5. MCP server
 
-`POST /mcp/{seller}` uses the MCP Streamable HTTP transport and the official TypeScript SDK.
-- **Auth:** the agent key in `Authorization: Bearer …`, configured once in the MCP client (Claude Desktop, Cursor).
-- **Tools:** one per seller endpoint. The name and description come from the listing, and the input schema comes from the endpoint's parameters. **Each tool's description includes its price**, so the model sees the cost before calling it.
-- **A tool call** runs the autopay path (§2) and returns the upstream result. A short line ("Charged $0.002 via Piko") is added to the content.
-- **Errors** from §4 come back as MCP tool errors with the same `code`. `approval_pending` includes the approval URL so a human can act on it.
+`POST /mcp/{seller}` uses the MCP Streamable HTTP transport and the official TypeScript SDK (`@modelcontextprotocol/sdk`). It is a JSON-RPC protocol endpoint defined by the MCP spec, so it is not in openapi.yaml (which also keeps that file inside its operation budget).
+- **Stateless.** Every POST builds a fresh server, so there are no sessions (no `Mcp-Session-Id`) and responses are plain JSON, never an SSE stream. `GET` and `DELETE` get `405`.
+- **Auth:** the agent key in `Authorization: Bearer …`, configured once in the MCP client (Claude Desktop, Cursor, the MCP Inspector). A missing, wrong or revoked Key is an HTTP `401 invalid_key` (the §4 body), before any MCP message is read. A frozen agent still connects; its tool calls fail with `agent_frozen`.
+- **Seller:** `{seller}` is the seller org's slug, as in `/g/{seller}/…`. An unknown slug, or a seller with no Listing offered over MCP, is an HTTP `404 not_found`.
+- **Tools:** one per Endpoint of the seller's Listings whose `kind` is `mcp` or `both` (`http` Listings are gateway-only). Endpoints whose method is `TOOL` are skipped until the gateway can forward to an MCP upstream.
+  - **Name:** the method and path in lower case, with every run of other characters turned into `_`: `GET /history` is `get_history`, `POST /v1/summarise` is `post_v1_summarise`, `GET /` is `get_root`. A clash gets `_2`, `_3`, ….
+  - **Description:** `<Listing name> (<METHOD> <path>): <Listing description> Price: $0.002 per call, paid from your Piko wallet.`, plus `Your first N calls are free.` when the Endpoint has a free allowance, or `Price: free.` for a $0 Endpoint. The model sees the cost before calling.
+  - **Input schema:** `{ query?: { [name]: string | number | boolean } }`, plus `body?: <any JSON>` for POST, PUT and PATCH. `query` becomes the query string and `body` is sent as `application/json`. Endpoints have no parameter schema yet, so this is the same for every tool.
+- **A tool call** is an autopay request (§2) to `/{METHOD} /g/{seller}/{path}` with the caller's Key, run in process through the same gateway code, so the free allowance, $0 Endpoints, the frozen check, the pay pipeline, forwarding, settling and the refund on an upstream failure all behave exactly as there. One tool call is one Challenge and at most one charge (three Ledger entries). The result is the upstream body as text (or as image content for an `image/*` response), followed by a line `Charged $0.002 via Piko (Call <callId>).`, or `Free call via Piko: nothing was charged.` for a free Call. An upstream 4xx is still a paid Call: the result has `isError: true` and the line starts `The upstream API answered 404.`
+- **Errors** from §4 come back as MCP tool results with `isError: true`, never as HTTP or JSON-RPC errors. `content[0].text` is `<code>: <message>`, followed by the details as JSON on the next line, and `structuredContent` is the §4 body, for example `{ "error": { "code": "insufficient_funds", "message": "…", "balance": "0" } }`. An upstream 5xx or timeout gives `upstream_failed` with `refunded: true`: nothing was charged. `approval_pending` (once P5-04 adds it) will include the approval URL in its details, so a human can act on it.
+- **Retries:** a tool call sends no `Idempotency-Key`, so a client that retries a call it already paid for pays again. The JSON-RPC request id can't be the key: in a stateless server ids are only unique per client connection and restart from 0.
 - **x402 over MCP (optional, not in the build order):** to serve x402-native MCP clients, follow the x402 v2 MCP transport ([spec](https://github.com/x402-foundation/x402/blob/main/specs/transports-v2/mcp.md)). An unpaid call returns a tool result with `isError: true` and the `PaymentRequired` object in `structuredContent` (and as JSON text in `content[0].text`). The client retries with the `PaymentPayload` in `params._meta["x402/payment"]`, and the result carries the `SettlementResponse` in `_meta["x402/payment-response"]`. MCP uses plain JSON objects there, not base64.
+
+### Connecting a client
+
+The URL is `https://<app>/mcp/<seller>`, for example `http://localhost:3000/mcp/priya`, and the Key is an agent Key from the Wallet console (or the one `npm run seed` prints for Sam).
+- **MCP Inspector:** `npx @modelcontextprotocol/inspector`, choose transport **Streamable HTTP**, enter the URL, and under **Authentication** add the header `Authorization` with the value `Bearer pk_agent_…`. Connect, then **Tools → List Tools**.
+- **Claude Desktop:** it connects to remote servers through the `mcp-remote` bridge. In `claude_desktop_config.json`:
+
+  ```json
+  {
+    "mcpServers": {
+      "piko-priya": {
+        "command": "npx",
+        "args": ["-y", "mcp-remote", "http://localhost:3000/mcp/priya",
+                 "--header", "Authorization:${PIKO_KEY}"],
+        "env": { "PIKO_KEY": "Bearer pk_agent_…" }
+      }
+    }
+  }
+  ```
+
+  The header is passed through an environment variable because some clients split arguments on spaces. Restart Claude Desktop; the tools appear under the Piko server.
+- **Cursor and other clients** that support remote servers with headers: `{ "url": "https://<app>/mcp/priya", "headers": { "Authorization": "Bearer pk_agent_…" } }`.
 
 ## 6. Internal dashboard routes (not in openapi.yaml)
 

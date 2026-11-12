@@ -51,10 +51,13 @@ export function CheckoutButton({
   clientId,
   name,
   priceMicro,
+  checkoutToken,
 }: {
   clientId: string;
+  /** Name and price are for display only; the server charges what the token says. */
   name: string;
   priceMicro: bigint;
+  checkoutToken: string;
 }) {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const slot = useRef<HTMLDivElement>(null);
@@ -67,7 +70,7 @@ export function CheckoutButton({
       const response = await fetch("/api/checkout/demo-product", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, price: price.replace(/[$,]/g, "") }),
+        body: JSON.stringify({ token: checkoutToken }),
       });
       const body = (await response.json()) as { orderId?: string; error?: { message: string } };
       if (!response.ok || !body.orderId) {
@@ -141,7 +144,7 @@ export function CheckoutButton({
     return () => {
       cancelled = true;
     };
-  }, [clientId, name, price]);
+  }, [clientId, name, price, checkoutToken]);
 
   return (
     <div className="flex flex-col gap-2">

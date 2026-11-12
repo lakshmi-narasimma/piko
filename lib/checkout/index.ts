@@ -20,10 +20,14 @@ export class CheckoutError extends Error {
   }
 }
 
-/** Creates the order, payable to `shopEmail`. Returns PayPal's order id. */
+/**
+ * Creates the order, payable to `shopEmail`. Returns PayPal's order id. `name` and
+ * `priceMicro` must come from a server-side record (a verified checkout token), never from the
+ * browser. `requestId` is sent as PayPal-Request-Id, so the same id always gets the same order.
+ */
 export async function createCheckout(
   paypal: PayPalClient,
-  input: { name: string; priceMicro: MicroUsd; shopEmail: string },
+  input: { name: string; priceMicro: MicroUsd; shopEmail: string; requestId?: string },
 ): Promise<{ orderId: string }> {
   const { name, priceMicro, shopEmail } = input;
   if (priceMicro < MIN_CHECKOUT_MICRO || priceMicro > MAX_CHECKOUT_MICRO) {
@@ -34,7 +38,7 @@ export async function createCheckout(
   }
   const order = await createOrder(paypal, {
     amountMicro: priceMicro,
-    requestId: `checkout-${crypto.randomUUID()}`,
+    requestId: `checkout-${input.requestId ?? crypto.randomUUID()}`,
     description: `${DESCRIPTION_PREFIX}${name}`.slice(0, 127),
     payeeEmail: shopEmail,
   });

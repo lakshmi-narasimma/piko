@@ -7,7 +7,13 @@ import { CheckoutButton } from "./checkout-button";
 
 const DEFAULT_PROMPT = "Find me the best 4K monitor under $300 that's actually in stock";
 
-type Recommendation = { name: string; priceMicro: string; url?: string } | null;
+type Recommendation = {
+  name: string;
+  priceMicro: string;
+  url?: string;
+  /** Signed by the server; the only thing the checkout route accepts. */
+  checkoutToken?: string;
+} | null;
 
 type Step =
   | { kind: "reasoning"; text: string }
@@ -254,11 +260,16 @@ export function Playground({ paypalClientId }: { paypalClientId: string }) {
               <p className="text-sm text-muted">Recommended</p>
               <p className="font-medium">{run.recommendation.name}</p>
               <p className="mb-3">{formatUsd(BigInt(run.recommendation.priceMicro))}</p>
-              <CheckoutButton
-                clientId={paypalClientId}
-                name={run.recommendation.name}
-                priceMicro={BigInt(run.recommendation.priceMicro)}
-              />
+              {run.recommendation.checkoutToken ? (
+                <CheckoutButton
+                  clientId={paypalClientId}
+                  name={run.recommendation.name}
+                  priceMicro={BigInt(run.recommendation.priceMicro)}
+                  checkoutToken={run.recommendation.checkoutToken}
+                />
+              ) : (
+                <p className="text-sm text-muted">Checkout isn&apos;t available for this run.</p>
+              )}
             </div>
           )}
         </section>

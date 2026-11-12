@@ -294,7 +294,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** The F6 breaker item passes with `loop-bot`.
   - **Depends on:** P1-09
 
-- [ ] **P5-07 Kill switch** · `core` `ui` · M
+- [x] **P5-07 Kill switch** · `core` `ui` · M
   - **Goal:** Freeze and unfreeze an agent, a team or a whole org. A frozen agent gets 423 `agent_frozen`, and so does a Receipt it already holds: the gateway's `PAYMENT-SIGNATURE` path must also refuse a frozen agent, team or org, so Receipts issued before a breaker trip or a freeze can't be redeemed after it. Add the controls to the Org console.
   - **Done when:** The F6 team-freeze and org-freeze items pass.
   - **Depends on:** P5-06, P5-01
@@ -304,7 +304,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** A breaker trip shows as an alert within a few seconds.
   - **Depends on:** P5-06
 
-- [ ] **P5-09 Spend grid and audit export** · `ui` · M
+- [x] **P5-09 Spend grid and audit export** · `ui` · M
   - **Goal:** An AG Grid of spend by team, agent, vendor and day, with grouping and CSV export. Simulated rows are labelled.
   - **Done when:** It handles 12,000 rows smoothly (seed a test set), and the CSV downloads.
   - **Depends on:** P5-01

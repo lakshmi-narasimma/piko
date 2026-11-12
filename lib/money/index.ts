@@ -58,6 +58,17 @@ export function formatUsd(micro: MicroUsd): string {
   return `${sign}$${whole}.${fraction}`;
 }
 
+/**
+ * Micro-USD as a plain dollar decimal with all six places and no symbol or commas, for
+ * exports a spreadsheet reads: 2000n is "0.002000" and -500_000n is "-0.500000".
+ */
+export function toUsdDecimal(micro: MicroUsd): string {
+  const sign = micro < 0n ? "-" : "";
+  const abs = micro < 0n ? -micro : micro;
+  const fraction = (abs % MICRO_PER_USD).toString().padStart(MICRO_DIGITS, "0");
+  return `${sign}${abs / MICRO_PER_USD}.${fraction}`;
+}
+
 export interface PriceSplit {
   sellerMicro: MicroUsd;
   platformMicro: MicroUsd;

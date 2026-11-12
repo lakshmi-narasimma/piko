@@ -8,7 +8,12 @@ import type { BreakerLimits } from "../breaker";
 import type { Db } from "../db/client";
 import { getEnv } from "../env";
 import { jsonError, orInternalError } from "../http";
-import { authenticateRequest, type AuthenticatedAgent } from "../keys";
+import {
+  authenticateRequest,
+  currentFrozenScope,
+  type AuthenticatedAgent,
+  type FrozenScope,
+} from "../keys";
 import { claimReservation, releaseReservation } from "../ledger";
 import { payErrorResponse, PayError, runPayPipeline, type IssuedReceipt } from "../pay";
 import {
@@ -114,10 +119,8 @@ function withCors(response: Response): Response {
   return new Response(response.body, { status: response.status, headers });
 }
 
-function agentFrozen(agent: AuthenticatedAgent): Response {
-  return jsonError(423, "agent_frozen", `This agent is frozen at ${agent.frozenScope} level.`, {
-    scope: agent.frozenScope,
-  });
+function agentFrozen(scope: FrozenScope): Response {
+  return jsonError(423, "agent_frozen", `This agent is frozen at ${scope} level.`, { scope });
 }
 
 function maxBodyBytes(config: GatewayConfig): number {
@@ -205,7 +208,17 @@ async function serveFreeCall(
   route: GatewayRoute,
   request: Request,
   callId: string | null,
+  buyer: AuthenticatedAgent | null,
 ): Promise<Response> {
+  // The kill switch, read again now that the Call row exists: a freeze that committed after
+  // the Key was checked still stops this Call, and gives the free Call back.
+  if (callId && buyer) {
+    const frozen = await currentFrozenScope(db, buyer.agentId);
+    if (frozen) {
+      await releaseFreeCall(db, callId);
+      return agentFrozen(frozen);
+    }
+  }
   const body = await readBody(config, request);
   if (!body.ok) {
     if (callId) await releaseFreeCall(db, callId);
@@ -249,6 +262,11 @@ function withPaymentResponse(response: Response, settlement: SettlementResponse)
  * in any process. It also extends the hold to cover reading the body, the upstream call and
  * settling, so the seller never runs on a hold that has run out.
  *
+ * The kill switch is checked once the claim is held, so a Receipt issued before its agent,
+ * team or org was frozen (or before a breaker trip) can't be redeemed after: it gets 423
+ * `agent_frozen`, the hold is released and nothing is forwarded or charged. Any freeze that
+ * committed before this request's claim is seen.
+ *
  * `onClaimLost` lets a caller answer a lost claim its own way. Autopay with an
  * Idempotency-Key uses it to send the same 409 a concurrent request gets at any other step.
  */
@@ -274,6 +292,12 @@ async function servePaidCall(
       code: "challenge_expired",
       message: "This Receipt is in use, already used, or its reservation has ended.",
     });
+  }
+
+  const frozen = await currentFrozenScope(db, claims.agentId);
+  if (frozen) {
+    await releaseReservation(db, claims.nonce);
+    return agentFrozen(frozen);
   }
 
   const body = await readBody(config, request);
@@ -387,18 +411,18 @@ async function handle(
     const auth = await authenticateRequest(db, request.headers);
     if (!auth.ok) return jsonError(401, "invalid_key", "Missing, wrong or revoked key.");
     buyer = auth;
-    if (buyer.frozenScope) return agentFrozen(buyer);
+    if (buyer.frozenScope) return agentFrozen(buyer.frozenScope);
   }
 
   // A $0 Endpoint is always free: there is nothing to pay, so no Challenge.
   if (route.priceMicro === 0n) {
     const callId = buyer ? await recordZeroPriceCall(db, route, buyer) : null;
-    return serveFreeCall(deps, route, request, callId);
+    return serveFreeCall(deps, route, request, callId, buyer);
   }
 
   if (buyer && route.freeQuota > 0) {
     const callId = await claimFreeCall(db, route, buyer);
-    if (callId) return serveFreeCall(deps, route, request, callId);
+    if (callId) return serveFreeCall(deps, route, request, callId, buyer);
   }
 
   if (request.headers.get(AUTOPAY_HEADER)?.toLowerCase() === "true") {

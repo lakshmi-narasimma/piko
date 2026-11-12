@@ -24,6 +24,7 @@ vi.mock("@/lib/agent/playground", async (importOriginal) => ({
 
 const { POST } = await import("./route");
 const { NoAgentError } = await import("@/lib/agent/playground");
+const { getRunCache } = await import("@/lib/agent/cache");
 
 const RUN = {
   agentId: "a1",
@@ -116,5 +117,40 @@ describe("POST /api/playground/run", () => {
     expect(events.at(-1)).toMatchObject({ type: "done" });
     expect(log).toHaveBeenCalled();
     log.mockRestore();
+  });
+});
+
+describe("POST /api/playground/run replay", () => {
+  const earlier = [
+    { type: "answer", text: "Earlier answer." },
+    {
+      type: "done",
+      spentMicro: "2000",
+      spent: "$0.002",
+      remaining: "$0.098",
+      recommendation: null,
+    },
+  ] as const;
+
+  beforeEach(() => {
+    mocks.runAgent.mockImplementation(async function* () {
+      yield { type: "busy", message: "AI is busy" };
+      yield { type: "done", spentMicro: "0", recommendation: null };
+    });
+  });
+
+  it("sends a notice, then the earlier run, when busy before anything was paid", async () => {
+    getRunCache().set("org1", "replay me", [...earlier]);
+    const events = await frames(await POST(post({ prompt: "replay me" })));
+    expect(events.map((e) => e.type)).toEqual(["start", "notice", "answer", "done"]);
+    expect(events.at(-1)).toMatchObject({ spentMicro: "2000" });
+    expect(mocks.finishPlaygroundRun).toHaveBeenCalled();
+  });
+
+  it("doesn't replay once a paid call has settled", async () => {
+    getRunCache().set("org1", "paid already", [...earlier]);
+    mocks.createToolContext.mockReturnValue({ state: { spentMicro: 2_000n, reservedMicro: 0n } });
+    const events = await frames(await POST(post({ prompt: "paid already" })));
+    expect(events.map((e) => e.type)).toEqual(["start", "busy", "done"]);
   });
 });

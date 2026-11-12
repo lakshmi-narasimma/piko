@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isCacheable, RunCache } from "./cache";
+import { isCacheable, RunCache, shouldReplay } from "./cache";
 import type { AgentEvent } from "./run";
 
 const done: AgentEvent = {
@@ -59,5 +59,27 @@ describe("isCacheable", () => {
     expect(isCacheable([answer, done])).toBe(false);
     expect(isCacheable([paidCall, done])).toBe(false);
     expect(isCacheable([paidCall, answer, { type: "busy", message: "b" }, done])).toBe(false);
+  });
+});
+
+describe("shouldReplay", () => {
+  const busy: AgentEvent = { type: "busy", message: "AI is busy" };
+  const fresh = { spentMicro: 0n, reservedMicro: 0n };
+
+  it("replays when the model is busy and nothing has been paid", () => {
+    expect(shouldReplay(busy, fresh)).toBe(true);
+  });
+
+  it("does not replay once a paid call has settled", () => {
+    expect(shouldReplay(busy, { spentMicro: 2_000n, reservedMicro: 0n })).toBe(false);
+  });
+
+  it("does not replay while a paid call is in flight", () => {
+    expect(shouldReplay(busy, { spentMicro: 0n, reservedMicro: 2_000n })).toBe(false);
+  });
+
+  it("ignores anything but a busy event", () => {
+    expect(shouldReplay(done, fresh)).toBe(false);
+    expect(shouldReplay({ type: "error", message: "x" }, fresh)).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import { getPrincipal } from "@/lib/auth";
-import { getRunCache, isCacheable } from "@/lib/agent/cache";
+import { getRunCache, isCacheable, shouldReplay } from "@/lib/agent/cache";
 import { runAgent, type AgentEvent } from "@/lib/agent/run";
 import { finishPlaygroundRun, NoAgentError, startPlaygroundRun } from "@/lib/agent/playground";
 import { createToolContext } from "@/lib/agent/tools";
@@ -81,9 +81,10 @@ export async function POST(request: Request) {
           prompt,
           abortSignal: request.signal,
         })) {
-          const madeProgress = events.some((e) => e.type !== "done");
-          const earlier =
-            event.type === "busy" && !madeProgress ? cache.get(principal.org.id, prompt) : null;
+          // Replay only while no paid call has settled or is in flight (see shouldReplay).
+          const earlier = shouldReplay(event, ctx.state)
+            ? cache.get(principal.org.id, prompt)
+            : null;
           if (earlier) {
             // The model is busy and this buyer already ran this prompt: show that run, and say so.
             send({

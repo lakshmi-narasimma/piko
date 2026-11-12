@@ -59,3 +59,15 @@ export function getRunCache(): RunCache {
   globalForCache.__pikoRunCache ??= new RunCache();
   return globalForCache.__pikoRunCache;
 }
+
+/**
+ * Whether a busy model should fall back to replaying the buyer's earlier run: only while no
+ * paid call has settled or is in flight. A failed free step (a search that errored) doesn't
+ * block the replay, but once money has moved the buyer must see this run, not an old one.
+ */
+export function shouldReplay(
+  event: AgentEvent,
+  state: { spentMicro: bigint; reservedMicro: bigint },
+): boolean {
+  return event.type === "busy" && state.spentMicro === 0n && state.reservedMicro === 0n;
+}

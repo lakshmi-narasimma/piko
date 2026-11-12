@@ -91,7 +91,13 @@ export async function startStubUpstream(): Promise<StubUpstream> {
 export async function createSeller(
   db: Db,
   upstreamUrl: string,
-  options: { priceMicro?: bigint; freeQuota?: number; method?: string; path?: string } = {},
+  options: {
+    priceMicro?: bigint;
+    freeQuota?: number;
+    method?: string;
+    path?: string;
+    kind?: "http" | "mcp" | "both";
+  } = {},
 ) {
   const slug = `seller-${randomUUID()}`;
   const [org] = await db
@@ -106,7 +112,7 @@ export async function createSeller(
       name: "Test Listing",
       description: "For gateway tests",
       baseUrl: upstreamUrl,
-      kind: "http",
+      kind: options.kind ?? "http",
     })
     .returning({ id: listings.id });
   const path = options.path ?? "/history";

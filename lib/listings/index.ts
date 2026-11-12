@@ -11,7 +11,7 @@
  *   `embedded: false`; the Directory embeds it on its next search (embedMissingListings).
  * - The Listing and its Endpoints are written in one transaction.
  */
-import { and, count, eq, inArray, like } from "drizzle-orm";
+import { and, asc, count, eq, inArray, like } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client";
 import { endpoints, listings } from "../db/schema";
@@ -33,6 +33,16 @@ export const MAX_PRICE_MICRO = 100_000_000n;
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/;
 // Root-relative path segments of unreserved characters; no query, fragment or dot segments.
 const PATH = /^(?:\/[A-Za-z0-9._~-]+)+$/;
+
+/** A free allowance: whole free Calls per buyer org, per Endpoint. */
+const freeQuotaSchema = z.number().int().min(0).max(1_000_000);
+
+/** Adds an issue to `ctx` when a price is outside $0 to $100 per Call. */
+function checkPriceRange(priceMicro: bigint, ctx: z.RefinementCtx) {
+  if (priceMicro < 0n || priceMicro > MAX_PRICE_MICRO) {
+    ctx.addIssue({ code: "custom", message: "A price must be between $0 and $100 per Call." });
+  }
+}
 
 const priceSchema = z.union([
   // Micro-USD as a string of digits, the API's usual form ("2000" = $0.002).
@@ -57,7 +67,7 @@ const endpointSchema = z
       ),
     priceMicro: z.string().optional(),
     price: z.string().optional(),
-    freeQuota: z.number().int().min(0).max(1_000_000).default(0),
+    freeQuota: freeQuotaSchema.default(0),
   })
   .transform((endpoint, ctx) => {
     const parsed = priceSchema.safeParse(endpoint);
@@ -75,9 +85,7 @@ const endpointSchema = z
         ctx.addIssue({ code: "custom", message: `"${endpoint.price}" is not a dollar amount.` });
       }
     }
-    if (priceMicro !== null && (priceMicro < 0n || priceMicro > MAX_PRICE_MICRO)) {
-      ctx.addIssue({ code: "custom", message: "A price must be between $0 and $100 per Call." });
-    }
+    if (priceMicro !== null) checkPriceRange(priceMicro, ctx);
     return {
       method: endpoint.method,
       path: endpoint.path,
@@ -158,7 +166,8 @@ export type ListingErrorCode =
   | "blocked_base_url"
   | "slug_taken"
   | "route_taken"
-  | "listing_limit";
+  | "listing_limit"
+  | "not_found";
 
 export class ListingError extends Error {
   constructor(
@@ -447,4 +456,135 @@ export async function handleCreateListing(
     }
     throw error;
   }
+}
+
+/**
+ * A change to one Endpoint's price and free allowance (BACKLOG P6-01), with the same price
+ * rules as a new Listing. The price is dollars as a person types them ("0.002").
+ */
+export const updateEndpointSchema = z
+  .object({
+    price: z.string().trim().min(1).max(32),
+    freeQuota: freeQuotaSchema,
+  })
+  .transform((input, ctx) => {
+    let priceMicro: bigint;
+    try {
+      priceMicro = parseUsd(input.price);
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        path: ["price"],
+        message: `"${input.price}" is not a dollar amount.`,
+      });
+      return z.NEVER;
+    }
+    checkPriceRange(priceMicro, ctx);
+    return { priceMicro, freeQuota: input.freeQuota };
+  });
+
+export type UpdateEndpointInput = z.input<typeof updateEndpointSchema>;
+
+/**
+ * Sets an Endpoint's price and free allowance, if it belongs to `sellerOrgId`. The gateway
+ * reads both when each request arrives, so the next 402 carries the new price. A Challenge
+ * already issued keeps the amount it was issued for. Throws ListingError: `invalid_request`
+ * for a bad price or quota, `not_found` for another seller's Endpoint or an unknown id.
+ */
+export async function updateEndpoint(
+  db: Db,
+  sellerOrgId: string,
+  endpointId: string,
+  rawInput: unknown,
+): Promise<{ id: string; priceMicro: bigint; freeQuota: number }> {
+  const parsed = updateEndpointSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message }));
+    throw new ListingError(400, "invalid_request", issues[0]?.message ?? "Invalid price.", {
+      issues,
+    });
+  }
+  const notFound = () => new ListingError(404, "not_found", "No such Endpoint on your Listings.");
+  if (!z.uuid().safeParse(endpointId).success) throw notFound();
+
+  const [row] = await db
+    .update(endpoints)
+    .set({ priceMicro: parsed.data.priceMicro, freeQuota: parsed.data.freeQuota })
+    .where(and(eq(endpoints.id, endpointId), eq(endpoints.sellerOrgId, sellerOrgId)))
+    .returning({
+      id: endpoints.id,
+      priceMicro: endpoints.priceMicro,
+      freeQuota: endpoints.freeQuota,
+    });
+  if (!row) throw notFound();
+  return row;
+}
+
+export interface SellerListing {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  kind: "http" | "mcp" | "both";
+  endpoints: Array<{
+    id: string;
+    method: string;
+    path: string;
+    priceMicro: bigint;
+    freeQuota: number;
+    /** `${APP_BASE_URL}/g/{seller}{path}`, or null for an MCP tool (method TOOL). */
+    gatewayUrl: string | null;
+  }>;
+}
+
+/** A seller org's Listings with their Endpoints, oldest first, for the Seller console. */
+export async function sellerListings(
+  db: Db,
+  seller: ListingSeller,
+  appBaseUrl: string,
+): Promise<SellerListing[]> {
+  const rows = await db
+    .select({
+      listing: {
+        id: listings.id,
+        slug: listings.slug,
+        name: listings.name,
+        description: listings.description,
+        kind: listings.kind,
+      },
+      endpoint: {
+        id: endpoints.id,
+        method: endpoints.method,
+        path: endpoints.pathOrTool,
+        priceMicro: endpoints.priceMicro,
+        freeQuota: endpoints.freeQuota,
+      },
+    })
+    .from(listings)
+    .leftJoin(endpoints, eq(endpoints.listingId, listings.id))
+    .where(eq(listings.sellerOrgId, seller.orgId))
+    .orderBy(
+      asc(listings.createdAt),
+      asc(listings.id),
+      asc(endpoints.createdAt),
+      asc(endpoints.id),
+    );
+
+  const appBase = appBaseUrl.replace(/\/+$/, "");
+  const byId = new Map<string, SellerListing>();
+  for (const { listing, endpoint } of rows) {
+    let entry = byId.get(listing.id);
+    if (!entry) {
+      entry = { ...listing, endpoints: [] };
+      byId.set(listing.id, entry);
+    }
+    if (endpoint) {
+      entry.endpoints.push({
+        ...endpoint,
+        gatewayUrl:
+          endpoint.method === "TOOL" ? null : `${appBase}/g/${seller.slug}${endpoint.path}`,
+      });
+    }
+  }
+  return [...byId.values()];
 }

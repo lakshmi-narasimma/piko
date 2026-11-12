@@ -14,8 +14,12 @@ import {
   orgs,
 } from "../db/schema";
 import { createKey } from "../keys";
+import { seedAcmeTemp } from "./acme-temp";
 
 export const PRIYA_SEED_BALANCE_MICRO = 940_000n;
+
+/** Acme Corp's credit limit, $500 (docs/SEED_DATA.md §2). */
+export const ACME_CREDIT_LIMIT_MICRO = 500_000_000n;
 
 /** The Ledger's unique index keys on ref_id, so the seed uses a fixed one. */
 const PRIYA_SEED_REF = "seed:priya-labs-balance";
@@ -146,6 +150,19 @@ export function seed(db: Db, { appBaseUrl, samWalletMicro }: SeedOptions): Promi
       .returning({ id: agents.id });
     const samKey = await createKey(tx, samAgent!.id);
 
+    // Dana's org. Its teams, agents, budgets and policies come with the full world (P9-01).
+    await createOrg(
+      {
+        name: "Acme Corp",
+        slug: "acme",
+        kind: "company",
+        billing: "invoiced",
+        creditLimitMicro: ACME_CREDIT_LIMIT_MICRO,
+      },
+      "Dana",
+      "dana@acme.demo",
+    );
+
     const sellerOrgIds = new Map<SellerSlug, string>();
     for (const { slug, name, email, person } of SELLER_ORGS) {
       const orgId = await createOrg(
@@ -189,6 +206,9 @@ export function seed(db: Db, { appBaseUrl, samWalletMicro }: SeedOptions): Promi
         refId: "seed:sam-wallet",
       });
     }
+
+    // Temporary until P9-01: Acme's teams, agents and budgets for the Org console.
+    await seedAcmeTemp(tx);
 
     return { samKey: samKey.rawKey };
   });

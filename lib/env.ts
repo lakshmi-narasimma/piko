@@ -12,6 +12,13 @@ import { z } from "zod";
 const required = z.string().min(1);
 const positiveInt = z.coerce.number().int().positive();
 
+// Signing keys and shared secrets: long enough to resist guessing, and never the
+// .env.example placeholder. Generate one with `openssl rand -base64 48`.
+const strongSecret = z
+  .string()
+  .min(32, "must be at least 32 characters (generate one with `openssl rand -base64 48`)")
+  .refine((value) => value !== "change-me", "must not be the .env.example placeholder");
+
 // Decision 0011: aliases such as gemini-flash-latest hot-swap without notice, so only
 // pinned ids are accepted.
 const pinnedModelId = z
@@ -35,8 +42,11 @@ const envSchema = z.object({
 
   // App
   APP_BASE_URL: z.url(),
-  SESSION_SECRET: required,
-  RECEIPT_SIGNING_SECRET: required,
+  SESSION_SECRET: strongSecret,
+  RECEIPT_SIGNING_SECRET: strongSecret,
+  // Sent by the gateway as X-Piko-Secret to the sample seller APIs under /api/demo/sellers,
+  // which refuse any request without it.
+  DEMO_UPSTREAM_SECRET: strongSecret,
   DEMO_MODE: z.stringbool().default(false),
 
   // Database (Neon). The app uses the pooled URL; migrations use the direct one.
@@ -82,6 +92,12 @@ const envSchema = z.object({
     .transform((value) => BigInt(value)),
   BREAKER_MAX_CALLS: positiveInt.default(50),
   BREAKER_WINDOW_SECONDS: positiveInt.default(10),
+  // The circuit breaker's dollars-per-minute limit, in micro-USD (DESIGN.md section 9).
+  BREAKER_MAX_MICRO_PER_MINUTE: z
+    .string()
+    .regex(/^[1-9]\d*$/, "must be a positive whole number of micro-USD")
+    .default("2000000")
+    .transform((value) => BigInt(value)),
   CHALLENGE_TTL_SECONDS: positiveInt.default(30),
   RECEIPT_TTL_SECONDS: positiveInt.default(60),
   UPSTREAM_TIMEOUT_MS: positiveInt.default(10_000),

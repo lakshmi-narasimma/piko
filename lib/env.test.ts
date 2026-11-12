@@ -3,8 +3,9 @@ import { EnvError, parseEnv } from "./env";
 
 const valid = {
   APP_BASE_URL: "http://localhost:3000",
-  SESSION_SECRET: "test-session-secret",
-  RECEIPT_SIGNING_SECRET: "test-receipt-secret",
+  SESSION_SECRET: "test-session-secret-0123456789abcdef",
+  RECEIPT_SIGNING_SECRET: "test-receipt-secret-0123456789abcdef",
+  DEMO_UPSTREAM_SECRET: "test-demo-upstream-secret-0123456789",
   DATABASE_URL: "postgresql://user:pass@localhost:5432/piko",
   DATABASE_URL_POOLED: "postgresql://user:pass@localhost:5432/piko",
   PAYPAL_CLIENT_ID: "client-id",
@@ -21,6 +22,9 @@ describe("parseEnv", () => {
     expect(env.GEMINI_MODEL).toBe("gemini-3.6-flash");
     expect(env.PLATFORM_FEE_BPS).toBe(500);
     expect(env.PAYOUT_THRESHOLD_MICRO).toBe(1_000_000n);
+    expect(env.BREAKER_MAX_CALLS).toBe(50);
+    expect(env.BREAKER_WINDOW_SECONDS).toBe(10);
+    expect(env.BREAKER_MAX_MICRO_PER_MINUTE).toBe(2_000_000n);
     expect(env.DEMO_MODE).toBe(false);
   });
 
@@ -88,6 +92,35 @@ describe("parseEnv", () => {
     );
   });
 
+  it.each(["SESSION_SECRET", "RECEIPT_SIGNING_SECRET", "DEMO_UPSTREAM_SECRET"])(
+    "rejects a short or placeholder %s, naming it without its value",
+    (name) => {
+      for (const weak of ["change-me", "short-secret-31-characters-long"]) {
+        expect(weak.length).toBeLessThan(32);
+        let error: unknown;
+        try {
+          parseEnv({ ...valid, [name]: weak });
+        } catch (caught) {
+          error = caught;
+        }
+        expect(error).toBeInstanceOf(EnvError);
+        const issues = (error as EnvError).issues;
+        expect(issues.every((issue) => issue.startsWith(`${name}: `))).toBe(true);
+        expect(issues).toContain(
+          `${name}: must be at least 32 characters (generate one with \`openssl rand -base64 48\`)`,
+        );
+        if (weak === "change-me") {
+          expect(issues).toContain(`${name}: must not be the .env.example placeholder`);
+        }
+        expect((error as EnvError).message).not.toContain(weak);
+      }
+    },
+  );
+
+  it("accepts a secret of exactly 32 characters", () => {
+    expect(parseEnv({ ...valid, SESSION_SECRET: "x".repeat(32) }).SESSION_SECRET).toHaveLength(32);
+  });
+
   it("parses the Gemini fallback list and embedding dimensions", () => {
     const env = parseEnv({
       ...valid,
@@ -115,5 +148,13 @@ describe("parseEnv", () => {
       /PAYOUT_THRESHOLD_MICRO: must be a whole number/,
     );
     expect(() => parseEnv({ ...valid, PAYOUT_THRESHOLD_MICRO: "1.5" })).not.toThrow(/1\.5/);
+  });
+
+  it("rejects a breaker spend limit that is zero or not whole micro-USD", () => {
+    for (const value of ["0", "1.5", "-1"]) {
+      expect(() => parseEnv({ ...valid, BREAKER_MAX_MICRO_PER_MINUTE: value })).toThrow(
+        /BREAKER_MAX_MICRO_PER_MINUTE: must be a positive whole number/,
+      );
+    }
   });
 });

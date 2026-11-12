@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rejectUnlessFromGateway } from "./auth";
 import { getLlm, isAiBusy, AI_BUSY_MESSAGE, type Llm } from "@/lib/llm";
 
 const MAX_REVIEWS = 50;
@@ -67,6 +68,8 @@ export async function handleReviewSummary(
   tier: ReviewTier,
   options: { llm?: Pick<Llm, "generateStructured"> } = {},
 ): Promise<Response> {
+  const rejected = rejectUnlessFromGateway(request);
+  if (rejected) return rejected;
   let raw: unknown;
   try {
     raw = await request.json();

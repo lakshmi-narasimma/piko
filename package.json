@@ -25,6 +25,7 @@
     "@ai-sdk/groq": "^4.0.78",
     "@ai-sdk/provider": "^4.0.37",
     "@ai-sdk/provider-utils": "^5.0.76",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@next/env": "^16.4.5",
     "ai": "^7.0.166",
     "drizzle-orm": "0.45.4",

@@ -38,8 +38,9 @@ function smokeConfig(): LlmConfig {
   // and validation apply exactly as in the app.
   const env = parseEnv({
     APP_BASE_URL: "http://localhost:3000",
-    SESSION_SECRET: "smoke",
-    RECEIPT_SIGNING_SECRET: "smoke",
+    SESSION_SECRET: "test-session-secret-0123456789abcdef",
+    RECEIPT_SIGNING_SECRET: "test-receipt-secret-0123456789abcdef",
+    DEMO_UPSTREAM_SECRET: "test-demo-upstream-secret-0123456789",
     DATABASE_URL: "postgresql://unused@localhost/unused",
     DATABASE_URL_POOLED: "postgresql://unused@localhost/unused",
     PAYPAL_CLIENT_ID: "smoke",

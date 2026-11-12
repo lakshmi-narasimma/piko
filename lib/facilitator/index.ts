@@ -4,6 +4,7 @@
  */
 import { settlePayment, verifyPayment } from "../gateway/settlement";
 import type { Db } from "../db/client";
+import { orInternalError } from "../http";
 import {
   PAYPAL_LEDGER_SCHEME,
   X402_VERSION,
@@ -90,11 +91,15 @@ function settleFailure(
   return Response.json(failed, { status });
 }
 
-/** Handles `POST /api/facilitator/verify`. Read-only: it never consumes the Receipt. */
-export async function handleVerifyRequest(
-  deps: FacilitatorDeps,
-  request: Request,
-): Promise<Response> {
+/**
+ * Handles `POST /api/facilitator/verify`. Read-only: it never consumes the Receipt.
+ * An unexpected failure is logged and answered `500 internal_error`.
+ */
+export function handleVerifyRequest(deps: FacilitatorDeps, request: Request): Promise<Response> {
+  return orInternalError("POST /api/facilitator/verify", () => verifyRequest(deps, request));
+}
+
+async function verifyRequest(deps: FacilitatorDeps, request: Request): Promise<Response> {
   const read = await readRequest(request);
   if (!read.ok) {
     return Response.json(
@@ -116,12 +121,14 @@ export async function handleVerifyRequest(
 /**
  * Handles `POST /api/facilitator/settle`: consumes the Receipt and settles the Ledger.
  * Open to anyone holding the PaymentPayload, because the Receipt is the credential
- * (docs/API.md section 3). Every answer, failures included, is a SettlementResponse.
+ * (docs/API.md section 3). Every answer, failures included, is a SettlementResponse, except
+ * an unexpected failure: that is logged and answered `500 internal_error`.
  */
-export async function handleSettleRequest(
-  deps: FacilitatorDeps,
-  request: Request,
-): Promise<Response> {
+export function handleSettleRequest(deps: FacilitatorDeps, request: Request): Promise<Response> {
+  return orInternalError("POST /api/facilitator/settle", () => settleRequest(deps, request));
+}
+
+async function settleRequest(deps: FacilitatorDeps, request: Request): Promise<Response> {
   const { db, config } = deps;
   const read = await readRequest(request);
   if (!read.ok) return settleFailure(config, 400, read.code, read.message);

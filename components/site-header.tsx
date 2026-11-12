@@ -25,6 +25,11 @@ export async function SiteHeader() {
         <nav aria-label="Main" className="flex items-center gap-2 text-sm">
           {principal ? (
             <>
+              {principal.area === "wallet" && (
+                <Link href="/playground" className={button}>
+                  Playground
+                </Link>
+              )}
               <Link href={AREA_PATH[principal.area]} className={button}>
                 {principal.org.name}
               </Link>

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import {
@@ -23,6 +24,7 @@ import {
 } from "../x402";
 import { signReceipt, verifyReceipt } from "../x402/receipt";
 import { handleGatewayRequest, type GatewayConfig } from "./index";
+import { refundPayment, settlePayment } from "./settlement";
 
 const url = inject("testDatabaseUrl");
 
@@ -116,6 +118,11 @@ describe.skipIf(!url)("gateway: paid retry", () => {
   const settlementOf = (res: Response) =>
     decodeHeaderValue(res.headers.get("PAYMENT-RESPONSE")!) as SettlementResponse;
   const errorOf = async (res: Response) => ((await res.json()) as { error: object }).error;
+  const claimsOf = (issued: IssuedReceipt) => {
+    const verified = verifyReceipt(issued.receipt, config.receiptSigningSecret);
+    if (!verified.ok) throw new Error("receipt should verify");
+    return verified.claims;
+  };
 
   it("forwards a paid retry, settles the ledger and returns PAYMENT-RESPONSE", async () => {
     const seller = await createSeller(db, upstream.url);
@@ -338,7 +345,8 @@ describe.skipIf(!url)("gateway: paid retry", () => {
     const res = await call(seller, { signature: issued.paymentSignature });
 
     expect(res.status).toBe(502);
-    expect(await errorOf(res)).toMatchObject({ code: "upstream_failed", refunded: true });
+    const error = (await errorOf(res)) as { callId: string };
+    expect(error).toMatchObject({ code: "upstream_failed", refunded: true });
     expect(settlementOf(res)).toEqual({
       success: false,
       errorReason: "upstream_failed",
@@ -348,7 +356,18 @@ describe.skipIf(!url)("gateway: paid retry", () => {
     expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
     expect(await availableFunds(db, buyer.orgId)).toBe(10_000n);
     expect(await balanceOf(db, { type: "seller", orgId: seller.orgId })).toBe(0n);
-    expect(await db.select().from(calls).where(eq(calls.nonce, nonce))).toHaveLength(0);
+    const rows = await db.select().from(calls).where(eq(calls.nonce, nonce));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: error.callId,
+      status: "refunded",
+      amountMicro: 2_000n,
+      agentId: buyer.agentId,
+      buyerOrgId: buyer.orgId,
+      upstreamStatus: 500,
+    });
+    expect(rows[0]!.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(await callEntries(db, error.callId)).toHaveLength(0);
 
     const retry = await call(seller, { signature: issued.paymentSignature });
     expect(retry.status).toBe(410);
@@ -360,7 +379,7 @@ describe.skipIf(!url)("gateway: paid retry", () => {
     });
     const seller = await createSeller(db, upstream.url);
     const buyer = await createBuyer(db, 10_000n);
-    const { issued } = await paidReceipt(seller, buyer.rawKey);
+    const { nonce, issued } = await paidReceipt(seller, buyer.rawKey);
 
     const res = await call(seller, {
       signature: issued.paymentSignature,
@@ -368,9 +387,96 @@ describe.skipIf(!url)("gateway: paid retry", () => {
     });
 
     expect(res.status).toBe(502);
-    expect(await errorOf(res)).toMatchObject({ code: "upstream_failed", refunded: true });
+    const error = (await errorOf(res)) as { callId: string };
+    expect(error).toMatchObject({ code: "upstream_failed", refunded: true });
+    expect(settlementOf(res)).toMatchObject({ success: false, errorReason: "upstream_failed" });
     expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
     expect(await availableFunds(db, buyer.orgId)).toBe(10_000n);
+    expect(await balanceOf(db, { type: "seller", orgId: seller.orgId })).toBe(0n);
+    const [row] = await db.select().from(calls).where(eq(calls.nonce, nonce));
+    // No upstream status: a timeout is recorded as null.
+    expect(row).toMatchObject({ id: error.callId, status: "refunded", upstreamStatus: null });
+    expect(row!.latencyMs).toBeGreaterThanOrEqual(100);
+    expect(await callEntries(db, error.callId)).toHaveLength(0);
+  });
+
+  it("refunds when the upstream can't be reached at all", async () => {
+    const seller = await createSeller(db, "http://127.0.0.1:1");
+    const buyer = await createBuyer(db, 10_000n);
+    const { nonce, issued } = await paidReceipt(seller, buyer.rawKey);
+
+    const res = await call(seller, { signature: issued.paymentSignature });
+
+    expect(res.status).toBe(502);
+    expect(await errorOf(res)).toMatchObject({ code: "upstream_failed", refunded: true });
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+    const [row] = await db.select().from(calls).where(eq(calls.nonce, nonce));
+    expect(row).toMatchObject({ status: "refunded", upstreamStatus: null });
+  });
+
+  it("records one refunded Call per Challenge, however often the refund runs", async () => {
+    upstream.respond((_req, res) => {
+      res.writeHead(503);
+      res.end();
+    });
+    const seller = await createSeller(db, upstream.url);
+    const buyer = await createBuyer(db, 10_000n);
+    const { nonce, issued } = await paidReceipt(seller, buyer.rawKey);
+    expect((await call(seller, { signature: issued.paymentSignature })).status).toBe(502);
+
+    const again = await refundPayment(db, claimsOf(issued), { upstreamStatus: 503, latencyMs: 1 });
+
+    expect(again).toBeNull();
+    expect(await db.select().from(calls).where(eq(calls.nonce, nonce))).toHaveLength(1);
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+  });
+
+  it("records exactly one refunded Call when two refunds race", async () => {
+    const seller = await createSeller(db, upstream.url);
+    const buyer = await createBuyer(db, 10_000n);
+    const { nonce, issued } = await paidReceipt(seller, buyer.rawKey);
+    const claims = claimsOf(issued);
+
+    const results = await Promise.all([
+      refundPayment(db, claims, { upstreamStatus: 503, latencyMs: 1 }),
+      refundPayment(db, claims, { upstreamStatus: 503, latencyMs: 1 }),
+    ]);
+
+    expect(results.filter((id) => id !== null)).toHaveLength(1);
+    expect(await db.select().from(calls).where(eq(calls.nonce, nonce))).toHaveLength(1);
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+  });
+
+  it("records nothing when refunding an unknown nonce", async () => {
+    const seller = await createSeller(db, upstream.url);
+    const buyer = await createBuyer(db, 10_000n);
+    const { issued } = await paidReceipt(seller, buyer.rawKey);
+    const unknown = { ...claimsOf(issued), nonce: `c_unknown_${randomUUID()}` };
+
+    expect(await refundPayment(db, unknown, { upstreamStatus: 503, latencyMs: 1 })).toBeNull();
+    expect(await db.select().from(calls).where(eq(calls.nonce, unknown.nonce))).toHaveLength(0);
+  });
+
+  it("does not refund a Receipt the facilitator settled while the upstream was failing", async () => {
+    const seller = await createSeller(db, upstream.url);
+    const buyer = await createBuyer(db, 10_000n);
+    const { nonce, issued } = await paidReceipt(seller, buyer.rawKey);
+    upstream.respond((_req, res) => {
+      // Settle through the facilitator while the gateway waits on the upstream.
+      void settlePayment(db, config, claimsOf(issued)).then(() => {
+        res.writeHead(500);
+        res.end();
+      });
+    });
+
+    const res = await call(seller, { signature: issued.paymentSignature });
+
+    expect(res.status).toBe(410);
+    expect(await errorOf(res)).toMatchObject({ code: "challenge_expired" });
+    const rows = await db.select().from(calls).where(eq(calls.nonce, nonce));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.status).toBe("paid");
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(8_000n);
   });
 
   it("settles and passes through a 4xx from the upstream", async () => {
@@ -390,6 +496,26 @@ describe.skipIf(!url)("gateway: paid retry", () => {
     expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(8_000n);
     const [row] = await db.select().from(calls).where(eq(calls.nonce, nonce));
     expect(row).toMatchObject({ status: "paid", upstreamStatus: 404 });
+    expect(await callEntries(db, row!.id)).toHaveLength(3);
+  });
+
+  it("settles a 400 from the upstream as paid, with three Ledger entries", async () => {
+    upstream.respond((_req, res) => {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ bad: true }));
+    });
+    const seller = await createSeller(db, upstream.url);
+    const buyer = await createBuyer(db, 10_000n);
+    const { nonce, issued } = await paidReceipt(seller, buyer.rawKey);
+
+    const res = await call(seller, { signature: issued.paymentSignature });
+
+    expect(res.status).toBe(400);
+    expect(settlementOf(res).success).toBe(true);
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(8_000n);
+    const [row] = await db.select().from(calls).where(eq(calls.nonce, nonce));
+    expect(row).toMatchObject({ status: "paid", upstreamStatus: 400 });
+    expect(await callEntries(db, row!.id)).toHaveLength(3);
   });
 
   it("passes through a 204 with no body", async () => {

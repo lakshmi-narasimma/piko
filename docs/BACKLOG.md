@@ -254,7 +254,7 @@ Covers part of TEST_PLAN **F10**.
   - **Done when:** The F9 directory item passes in the UI.
   - **Depends on:** P3-01, P2-03
 
-- [ ] **P4-04 "Connect an API" form** · `ui` · S
+- [x] **P4-04 "Connect an API" form** · `ui` · S
   - **Goal:** A seller pastes a URL, adds endpoints and prices, and publishes. Phase 6 builds the rest of the seller console.
   - **Done when:** The first F10 item passes as Priya.
   - **Depends on:** P4-01, P2-03
@@ -264,12 +264,12 @@ Covers part of TEST_PLAN **F10**.
 ## Phase 5: Org controls
 Covers TEST_PLAN **F5** and **F6**.
 
-- [ ] **P5-01 Org console shell** · `ui` · M
+- [x] **P5-01 Org console shell** · `ui` · M
   - **Goal:** The team and agent tree for Acme, with each budget and spend so far. Create teams and agents, and move agents between teams.
   - **Done when:** Dana sees Acme's 3 teams and 5 agents (from a temporary seed until P9-01).
   - **Depends on:** P2-03
 
-- [ ] **P5-02 Budgets** · `core` · M
+- [x] **P5-02 Budgets** · `core` · M
   - **Goal:** Budgets at the org, team, agent and task level, by day, month or task, with an optional category. Spend comes from the ledger. Add the budget step to the pay pipeline, returning 402 `budget_exceeded` with `remaining`.
   - **Done when:** The F5 agent-budget and team-budget items pass.
   - **Depends on:** P1-09
@@ -295,7 +295,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Depends on:** P1-09
 
 - [ ] **P5-07 Kill switch** · `core` `ui` · M
-  - **Goal:** Freeze and unfreeze an agent, a team or a whole org. A frozen agent gets 423 `agent_frozen`. Add the controls to the Org console.
+  - **Goal:** Freeze and unfreeze an agent, a team or a whole org. A frozen agent gets 423 `agent_frozen`, and so does a Receipt it already holds: the gateway's `PAYMENT-SIGNATURE` path must also refuse a frozen agent, team or org, so Receipts issued before a breaker trip or a freeze can't be redeemed after it. Add the controls to the Org console.
   - **Done when:** The F6 team-freeze and org-freeze items pass.
   - **Depends on:** P5-06, P5-01
 
@@ -369,7 +369,7 @@ Covers TEST_PLAN **F8**.
 ## Phase 8: MCP, enterprise rates, refunds, pricing assistant
 Covers TEST_PLAN **F3**, **F11**, and the rest of **F2** and **F10**.
 
-- [ ] **P8-01 Automatic refunds** · `core` · M
+- [x] **P8-01 Automatic refunds** · `core` · M
   - **Goal:** An upstream 5xx or timeout releases the Call's reservation without posting any ledger entries (in the `authorization` flow nothing is posted before the upstream answers), marks the Call refunded, and returns 502 `upstream_failed` with `refunded: true`. A 4xx stays paid.
   - **Done when:** Every F3 item passes.
   - **Depends on:** P1-10
@@ -379,7 +379,7 @@ Covers TEST_PLAN **F3**, **F11**, and the rest of **F2** and **F10**.
   - **Done when:** The F2 enterprise-rate item passes: Acme sees $0.007 and Sam sees $0.010.
   - **Depends on:** P6-01
 
-- [ ] **P8-03 Paid MCP server** · `core` · L
+- [x] **P8-03 Paid MCP server** · `core` · L
   - **Goal:** `POST /mcp/{seller}` with the MCP TypeScript SDK. It lists a seller's endpoints as tools with prices in their descriptions, authenticates with an agent key, charges through the same pipeline, and returns `insufficient_funds` as a tool error.
   - **Done when:** Every F11 item passes in Claude Desktop or the MCP Inspector.
   - **Depends on:** P1-12

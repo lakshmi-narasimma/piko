@@ -1,14 +1,15 @@
 /**
  * Verifying and settling a payment: shared by the gateway and the facilitator endpoints.
  * Verifying only reads. Settling consumes the Receipt and writes the Call and its Ledger
- * entries in one transaction.
+ * entries in one transaction. Refunding a failed Call releases its hold and records it as
+ * refunded, with no Ledger entries.
  */
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type { Db } from "../db/client";
 import { calls } from "../db/schema";
-import { LedgerError, settleCall } from "../ledger";
+import { LedgerError, releaseReservation, settleCall } from "../ledger";
 import { loadChallenge, type PayableChallenge } from "../pay";
 import {
   buildRequirements,
@@ -155,4 +156,46 @@ export async function settlePayment(
       amount: claims.amount,
     },
   };
+}
+
+export interface UpstreamFailure {
+  /** The upstream's 5xx status, or null when it timed out or gave no response. */
+  upstreamStatus: number | null;
+  latencyMs: number;
+}
+
+/**
+ * Refunds a verified payment whose upstream failed (5xx or timeout), before anything
+ * settled: releases the hold and records a `refunded` Call, atomically. In the
+ * authorization flow nothing was posted yet, so there are no Ledger entries to reverse
+ * and none are written.
+ *
+ * Returns the refunded Call's id, or null when the Receipt was already settled elsewhere
+ * (for example through the facilitator), so there was nothing to refund. A Challenge has
+ * at most one Call (`calls.nonce` is unique), so a repeat records nothing more.
+ */
+export function refundPayment(
+  db: Db,
+  claims: ReceiptClaims,
+  failure: UpstreamFailure,
+): Promise<string | null> {
+  return db.transaction(async (tx) => {
+    if (!(await releaseReservation(tx, claims.nonce))) return null;
+    // The claims were checked against the Challenge row when the payment was verified.
+    const [call] = await tx
+      .insert(calls)
+      .values({
+        nonce: claims.nonce,
+        agentId: claims.agentId,
+        buyerOrgId: claims.orgId,
+        endpointId: claims.endpointId,
+        amountMicro: BigInt(claims.amount),
+        status: "refunded",
+        upstreamStatus: failure.upstreamStatus,
+        latencyMs: failure.latencyMs,
+      })
+      .onConflictDoNothing({ target: calls.nonce })
+      .returning({ id: calls.id });
+    return call?.id ?? null;
+  });
 }

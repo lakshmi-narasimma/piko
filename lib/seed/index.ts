@@ -14,6 +14,7 @@ import {
   orgs,
 } from "../db/schema";
 import { createKey } from "../keys";
+import { seedAcmeTemp } from "./acme-temp";
 
 export const PRIYA_SEED_BALANCE_MICRO = 940_000n;
 
@@ -205,6 +206,9 @@ export function seed(db: Db, { appBaseUrl, samWalletMicro }: SeedOptions): Promi
         refId: "seed:sam-wallet",
       });
     }
+
+    // Temporary until P9-01: Acme's teams, agents and budgets for the Org console.
+    await seedAcmeTemp(tx);
 
     return { samKey: samKey.rawKey };
   });

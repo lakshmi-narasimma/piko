@@ -7,7 +7,7 @@ import {
   TEST_GATEWAY_CONFIG as config,
 } from "../../test/gateway-fixtures";
 import { createDb, type Db } from "../db/client";
-import { agents, alerts, challenges } from "../db/schema";
+import { agents, alerts, challenges, orgs, teams } from "../db/schema";
 import { handleGatewayRequest } from "../gateway";
 import { createKey } from "../keys";
 import { handlePayRequest } from "../pay";
@@ -223,6 +223,52 @@ describe.skipIf(!url)("circuit breaker in POST /api/pay", () => {
     expect(await activeHolds(buyer.agentId)).toBe(statuses.filter((s) => s === 200).length);
     expect(await frozenAt(buyer.agentId)).toBeInstanceOf(Date);
     expect(await alertsOf(buyer.agentId)).toHaveLength(1);
+  });
+
+  it("lets no concurrent burst past the spend limit, and writes one alert", async () => {
+    const buyer = await createBuyer(db, 1_000_000n);
+    const limits = small({ maxCalls: 100, maxMicroPerMinute: 5n * PRICE });
+    const nonces = await Promise.all(Array.from({ length: 20 }, () => challenge()));
+
+    const responses = await Promise.all(nonces.map((nonce) => pay(buyer.rawKey, nonce, limits)));
+    const statuses = responses.map((res) => res.status);
+    const paid = statuses.filter((status) => status === 200).length;
+
+    expect(paid).toBeLessThanOrEqual(5);
+    expect(statuses.every((status) => [200, 423, 429].includes(status))).toBe(true);
+    expect(statuses).toContain(429);
+    expect(await activeHolds(buyer.agentId)).toBe(paid);
+    expect(await frozenAt(buyer.agentId)).toBeInstanceOf(Date);
+    expect(await alertsOf(buyer.agentId)).toHaveLength(1);
+  });
+
+  it("answers a team- or org-frozen agent with 423 before the breaker runs", async () => {
+    // With no calls allowed, any payment that reached the breaker would trip it.
+    const limits = small({ maxCalls: 0 });
+    const control = await createBuyer(db, 1_000_000n);
+    expect((await payNew(control.rawKey, limits)).status).toBe(429);
+
+    const inTeam = await createBuyer(db, 1_000_000n);
+    const [team] = await db
+      .insert(teams)
+      .values({ orgId: inTeam.orgId, name: "frozen-team", frozenAt: new Date() })
+      .returning({ id: teams.id });
+    await db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, inTeam.agentId));
+
+    const inOrg = await createBuyer(db, 1_000_000n);
+    await db.update(orgs).set({ frozenAt: new Date() }).where(eq(orgs.id, inOrg.orgId));
+
+    for (const [buyer, scope] of [
+      [inTeam, "team"],
+      [inOrg, "org"],
+    ] as const) {
+      const res = await payNew(buyer.rawKey, limits);
+      expect(res.status).toBe(423);
+      expect(await errorOf(res)).toMatchObject({ code: "agent_frozen", scope });
+      expect(await frozenAt(buyer.agentId)).toBeNull();
+      expect(await alertsOf(buyer.agentId)).toHaveLength(0);
+      expect(await activeHolds(buyer.agentId)).toBe(0);
+    }
   });
 
   it("leaves other agents alone, in the same org and in others", async () => {

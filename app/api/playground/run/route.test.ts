@@ -12,7 +12,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth", () => ({ getPrincipal: mocks.getPrincipal }));
 vi.mock("@/lib/db", () => ({ getDb: () => ({}) }));
-vi.mock("@/lib/env", () => ({ getEnv: () => ({ APP_BASE_URL: "http://localhost:3000" }) }));
+vi.mock("@/lib/env", () => ({
+  getEnv: () => ({ APP_BASE_URL: "http://localhost:3000", SESSION_SECRET: "s".repeat(32) }),
+}));
 vi.mock("@/lib/llm", () => ({ getLlm: mocks.getLlm }));
 vi.mock("@/lib/agent/tools", () => ({ createToolContext: mocks.createToolContext }));
 vi.mock("@/lib/agent/run", () => ({ runAgent: mocks.runAgent }));
@@ -25,6 +27,7 @@ vi.mock("@/lib/agent/playground", async (importOriginal) => ({
 const { POST } = await import("./route");
 const { NoAgentError } = await import("@/lib/agent/playground");
 const { getRunCache } = await import("@/lib/agent/cache");
+const { verifyCheckoutToken } = await import("@/lib/checkout/token");
 
 const RUN = {
   agentId: "a1",
@@ -117,6 +120,23 @@ describe("POST /api/playground/run", () => {
     expect(events.at(-1)).toMatchObject({ type: "done" });
     expect(log).toHaveBeenCalled();
     log.mockRestore();
+  });
+
+  it("signs the recommendation for this org into a checkout token on done", async () => {
+    const recommendation = { name: "LG 27UP850", priceMicro: "279990000", url: "https://x" };
+    mocks.runAgent.mockImplementation(async function* () {
+      yield { type: "done", spentMicro: "0", recommendation };
+    });
+    const events = await frames(await POST(post({ prompt: "Find a monitor" })));
+    const done = events.at(-1) as unknown as {
+      recommendation: typeof recommendation & { checkoutToken: string };
+    };
+    expect(done.recommendation).toMatchObject(recommendation);
+    const verified = verifyCheckoutToken(done.recommendation.checkoutToken, "s".repeat(32), "org1");
+    expect(verified).toMatchObject({
+      ok: true,
+      claims: { orgId: "org1", name: "LG 27UP850", priceMicro: 279_990_000n, url: "https://x" },
+    });
   });
 });
 

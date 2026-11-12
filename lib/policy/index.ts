@@ -18,6 +18,7 @@ import {
   type PolicyScope,
 } from "./schema";
 
+export * from "./describe";
 export * from "./evaluate";
 export * from "./schema";
 

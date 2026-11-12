@@ -13,11 +13,12 @@ import {
   confirmBreaker,
   type BreakerLimits,
 } from "../breaker";
-import { recordBudgetAlert } from "../alerts";
+import { recordBudgetAlert, recordPolicyAlert } from "../alerts";
 import { BudgetExceededError, enforceBudgets, type BudgetState } from "../budgets";
 import type { Db } from "../db/client";
 import { challenges, endpoints, listings, orgs } from "../db/schema";
 import { jsonError } from "../http";
+import { evaluatePolicies, loadPolicies } from "../policy";
 import { authenticateRequest, type AuthenticatedAgent } from "../keys";
 import {
   InsufficientFundsError,
@@ -36,6 +37,7 @@ import {
   type PaymentPayload,
   type X402Config,
 } from "../x402";
+import { formatUsd } from "../money";
 import { signReceipt } from "../x402/receipt";
 
 /** Stops a payment. Maps to the API's error body (docs/API.md section 4). */
@@ -64,6 +66,22 @@ class BudgetBlockedError extends PayError {
       period: budget.period,
       category: budget.category,
       max: budget.maxMicro.toString(),
+    });
+  }
+}
+
+/** A payment a Policy blocked. The pipeline writes its alert once the payment has stopped. */
+class PolicyBlockedError extends PayError {
+  constructor(
+    public readonly policyName: string,
+    public readonly reason: string,
+    policyId: string,
+    rule: string,
+  ) {
+    super(403, "policy_denied", `Blocked by the policy "${policyName}". ${reason}`, {
+      policyId,
+      rule,
+      policy: policyName,
     });
   }
 }
@@ -239,6 +257,54 @@ const breakerRecount: PayStep = {
   },
 };
 
+/** DESIGN.md section 9, step 3: vendor block and allow, max price, approval above. */
+const checkPolicies: PayStep = {
+  name: "policy",
+  async run({ db, agent, challenge }) {
+    const policies = await loadPolicies(db, agent!.orgId);
+    if (policies.length === 0) return;
+    const [vendor] = await db
+      .select({
+        sellerSlug: orgs.slug,
+        sellerName: orgs.name,
+        listingSlug: listings.slug,
+        listingName: listings.name,
+        category: listings.category,
+      })
+      .from(endpoints)
+      .innerJoin(listings, eq(endpoints.listingId, listings.id))
+      .innerJoin(orgs, eq(listings.sellerOrgId, orgs.id))
+      .where(eq(endpoints.id, challenge!.endpointId));
+    const { category, ...names } = vendor!;
+    const decision = evaluatePolicies(policies, {
+      orgId: agent!.orgId,
+      teamId: agent!.teamId,
+      agentId: agent!.agentId,
+      vendor: names,
+      category,
+      priceMicro: challenge!.amountMicro,
+    });
+    if (decision.outcome === "deny") {
+      throw new PolicyBlockedError(
+        decision.policyName,
+        decision.reason,
+        decision.policyId,
+        decision.rule,
+      );
+    }
+    if (decision.outcome === "needs_approval") {
+      // TODO(P5-04): create an Approval and answer 202 approval_pending. Until approvals
+      // exist, a payment over the threshold is denied rather than let through unapproved.
+      throw new PolicyBlockedError(
+        decision.policyName,
+        `Payments over ${formatUsd(decision.thresholdMicro)} need an approval, and approvals aren't available yet.`,
+        decision.policyId,
+        "approval_above",
+      );
+    }
+  },
+};
+
 const checkBudgets: PayStep = {
   name: "budget",
   async run(context) {
@@ -321,8 +387,8 @@ const issueReceipt: PayStep = {
 };
 
 /**
- * Phase 5 adds its steps between `challenge` and `funds`, in the order DESIGN.md section 9
- * gives: breaker, then policies, then budgets (`budget`, the last before `funds`). The
+ * Phase 5's steps sit between `challenge` and `funds`, in the order DESIGN.md section 9
+ * gives: breaker, then policies (`policy`), then budgets (`budget`, the last before `funds`). The
  * breaker also recounts after `funds`, so a concurrent burst can't slip past it.
  */
 export const PAY_STEPS: readonly PayStep[] = [
@@ -330,6 +396,7 @@ export const PAY_STEPS: readonly PayStep[] = [
   rejectFrozen,
   loadPayableChallenge,
   breaker,
+  checkPolicies,
   checkBudgets,
   reserve,
   breakerRecount,
@@ -351,6 +418,7 @@ export async function runPayPipeline(
     for (const step of PAY_STEPS) await step.run(context);
   } catch (error) {
     if (error instanceof BudgetBlockedError) await alertBudget(context, error);
+    if (error instanceof PolicyBlockedError) await alertPolicy(context, error);
     throw error;
   }
   return context.issued!;
@@ -370,6 +438,20 @@ async function alertBudget(context: PayContext, error: BudgetBlockedError): Prom
     });
   } catch (failure) {
     console.error("Could not write the budget alert", failure);
+  }
+}
+
+/** Tells the org's admins a Policy blocked a payment, like {@link alertBudget}. */
+async function alertPolicy(context: PayContext, error: PolicyBlockedError): Promise<void> {
+  try {
+    await recordPolicyAlert(context.db, {
+      orgId: context.agent!.orgId,
+      agentId: context.agent!.agentId,
+      policyName: error.policyName,
+      reason: error.reason,
+    });
+  } catch (failure) {
+    console.error("Could not write the policy alert", failure);
   }
 }
 

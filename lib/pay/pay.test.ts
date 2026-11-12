@@ -61,12 +61,13 @@ describe.skipIf(!url)("POST /api/pay", () => {
 
   const errorOf = async (res: Response) => ((await res.json()) as { error: object }).error;
 
-  it("runs the steps in order, leaving room for Phase 5's checks before funds", () => {
+  it("runs the steps in DESIGN.md section 9's order", () => {
     expect(PAY_STEPS.map((step) => step.name)).toEqual([
       "key",
       "frozen",
       "challenge",
       "breaker",
+      "policy",
       "budget",
       "funds",
       "breaker-recount",

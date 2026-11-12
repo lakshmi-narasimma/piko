@@ -14,6 +14,12 @@ export interface ReserveFundsInput {
   buyerOrgId: string;
   /** How long the reservation holds funds. Use the Receipt's lifetime. */
   ttlSeconds: number;
+  /**
+   * Runs under the buyer org's lock, just before the funds check, for a new hold only (not
+   * for a reissued one). Throw to refuse the hold. It sees every other hold of the org that
+   * committed first, so a limit it checks (a Budget) can't be overrun by concurrent payments.
+   */
+  beforeHold?: (tx: DbOrTx, hold: { amountMicro: bigint; endpointId: string }) => Promise<void>;
 }
 
 export interface Reservation {
@@ -141,7 +147,7 @@ export async function availableFunds(db: DbOrTx, orgId: string): Promise<bigint>
  *   `challenge_already_reserved` or `unsupported_isolation`.
  */
 export function reserveFunds(db: DbOrTx, input: ReserveFundsInput): Promise<Reservation> {
-  const { nonce, agentId, buyerOrgId, ttlSeconds } = input;
+  const { nonce, agentId, buyerOrgId, ttlSeconds, beforeHold } = input;
   return db.transaction(async (tx) => {
     await assertReadCommitted(tx);
     const org = await lockOrg(tx, buyerOrgId);
@@ -186,6 +192,11 @@ export function reserveFunds(db: DbOrTx, input: ReserveFundsInput): Promise<Rese
     if (challenge.amountMicro <= 0n) {
       throw new LedgerError("invalid_amount", "A reservation must have a positive amount.");
     }
+
+    await beforeHold?.(tx, {
+      amountMicro: challenge.amountMicro,
+      endpointId: challenge.endpointId,
+    });
 
     const available = await fundsOf(tx, org);
     if (available < challenge.amountMicro) {

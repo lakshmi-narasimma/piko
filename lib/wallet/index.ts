@@ -124,17 +124,21 @@ export async function setAgentLimits(
       ["task", limits.taskBudgetMicro],
       ["day", limits.dayBudgetMicro],
     ] as const) {
-      await tx
-        .delete(budgets)
-        .where(
-          and(
-            eq(budgets.orgId, orgId),
-            eq(budgets.scopeType, "agent"),
-            eq(budgets.scopeId, agentId),
-            eq(budgets.period, period),
-            isNull(budgets.category),
-          ),
-        );
+      const thisBudget = and(
+        eq(budgets.orgId, orgId),
+        eq(budgets.scopeType, "agent"),
+        eq(budgets.scopeId, agentId),
+        eq(budgets.period, period),
+        isNull(budgets.category),
+      );
+      const existing = await tx
+        .select({ maxMicro: budgets.maxMicro })
+        .from(budgets)
+        .where(thisBudget);
+      // An unchanged cap keeps its row, so saving only "notify above" doesn't restart a task
+      // Budget's window (it runs from budgets.created_at, docs/decisions/0013-task-budgets.md).
+      if (max !== null && existing.length === 1 && existing[0]!.maxMicro === max) continue;
+      await tx.delete(budgets).where(thisBudget);
       if (max !== null) {
         await tx
           .insert(budgets)

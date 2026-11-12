@@ -269,7 +269,7 @@ Covers TEST_PLAN **F5** and **F6**.
   - **Done when:** Dana sees Acme's 3 teams and 5 agents (from a temporary seed until P9-01).
   - **Depends on:** P2-03
 
-- [ ] **P5-02 Budgets** · `core` · M
+- [x] **P5-02 Budgets** · `core` · M
   - **Goal:** Budgets at the org, team, agent and task level, by day, month or task, with an optional category. Spend comes from the ledger. Add the budget step to the pay pipeline, returning 402 `budget_exceeded` with `remaining`.
   - **Done when:** The F5 agent-budget and team-budget items pass.
   - **Depends on:** P1-09

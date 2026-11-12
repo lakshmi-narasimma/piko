@@ -1,9 +1,16 @@
 import { randomUUID } from "node:crypto";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { authenticateKey } from "../keys";
 import { createDb, type Db } from "../db/client";
-import { agents, ledgerEntries, orgs } from "../db/schema";
-import { createAgentKey, loadWallet, revokeAgentKey, setAgentLimits } from "./index";
+import { agents, budgets, ledgerEntries, orgs } from "../db/schema";
+import {
+  createAgentKey,
+  loadWallet,
+  revokeAgentKey,
+  setAgentLimits,
+  type AgentLimits,
+} from "./index";
 
 const url = inject("testDatabaseUrl");
 
@@ -77,6 +84,38 @@ describe.skipIf(!url)("wallet", () => {
       dayBudgetMicro: null,
       notifyAboveMicro: null,
     });
+  });
+
+  it("keeps a task budget's window when only another limit changes", async () => {
+    const { orgId, agentId } = await setup();
+    const save = (limits: AgentLimits) => setAgentLimits(db, { orgId, agentId, limits });
+    const taskRow = async () => {
+      const [row] = await db
+        .select({ id: budgets.id, createdAt: budgets.createdAt })
+        .from(budgets)
+        .where(and(eq(budgets.scopeId, agentId), eq(budgets.period, "task")));
+      return row;
+    };
+
+    await save({ taskBudgetMicro: 1_000_000n, dayBudgetMicro: null, notifyAboveMicro: null });
+    const first = await taskRow();
+    await save({
+      taskBudgetMicro: 1_000_000n,
+      dayBudgetMicro: 5_000_000n,
+      notifyAboveMicro: 50_000n,
+    });
+    expect(await taskRow()).toEqual(first);
+
+    // A new cap is a new task.
+    await save({
+      taskBudgetMicro: 2_000_000n,
+      dayBudgetMicro: 5_000_000n,
+      notifyAboveMicro: 50_000n,
+    });
+    const second = await taskRow();
+    expect(second?.id).not.toBe(first?.id);
+    const [agent] = (await loadWallet(db, orgId)).agents;
+    expect(agent).toMatchObject({ taskBudgetMicro: 2_000_000n, dayBudgetMicro: 5_000_000n });
   });
 
   it("revokes a key so it stops authenticating", async () => {

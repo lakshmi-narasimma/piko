@@ -266,8 +266,10 @@ export async function claimReservation(db: DbOrTx, input: ClaimReservationInput)
  * so it can't be paid again and its Receipt can never become valid again; the agent asks
  * for a new 402.
  *
- * Returns false when the Challenge is unknown or was already settled, so there was
- * nothing to release.
+ * Returns false when the Challenge is unknown or was already settled. It returns true
+ * for any unsettled Challenge, including one that was already released (the update is
+ * a no-op then), so callers that must act once rely on a unique key, as refundPayment
+ * does with calls.nonce.
  */
 export async function releaseReservation(db: DbOrTx, nonce: string): Promise<boolean> {
   const released = await db

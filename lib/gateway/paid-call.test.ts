@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import {
@@ -428,6 +429,32 @@ describe.skipIf(!url)("gateway: paid retry", () => {
     expect(again).toBeNull();
     expect(await db.select().from(calls).where(eq(calls.nonce, nonce))).toHaveLength(1);
     expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+  });
+
+  it("records exactly one refunded Call when two refunds race", async () => {
+    const seller = await createSeller(db, upstream.url);
+    const buyer = await createBuyer(db, 10_000n);
+    const { nonce, issued } = await paidReceipt(seller, buyer.rawKey);
+    const claims = claimsOf(issued);
+
+    const results = await Promise.all([
+      refundPayment(db, claims, { upstreamStatus: 503, latencyMs: 1 }),
+      refundPayment(db, claims, { upstreamStatus: 503, latencyMs: 1 }),
+    ]);
+
+    expect(results.filter((id) => id !== null)).toHaveLength(1);
+    expect(await db.select().from(calls).where(eq(calls.nonce, nonce))).toHaveLength(1);
+    expect(await balanceOf(db, { type: "wallet", orgId: buyer.orgId })).toBe(10_000n);
+  });
+
+  it("records nothing when refunding an unknown nonce", async () => {
+    const seller = await createSeller(db, upstream.url);
+    const buyer = await createBuyer(db, 10_000n);
+    const { issued } = await paidReceipt(seller, buyer.rawKey);
+    const unknown = { ...claimsOf(issued), nonce: `c_unknown_${randomUUID()}` };
+
+    expect(await refundPayment(db, unknown, { upstreamStatus: 503, latencyMs: 1 })).toBeNull();
+    expect(await db.select().from(calls).where(eq(calls.nonce, unknown.nonce))).toHaveLength(0);
   });
 
   it("does not refund a Receipt the facilitator settled while the upstream was failing", async () => {

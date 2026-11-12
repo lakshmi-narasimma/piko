@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { AlertsPanel } from "@/components/alerts-panel";
+import { CallFeed } from "@/components/call-feed";
+import { SimulateToggle } from "@/components/simulate-toggle";
 import { requirePrincipal } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { getEnv } from "@/lib/env";
 import { formatUsd } from "@/lib/money";
 import { loadOrgTree, type Spend, type TreeAgent, type TreeBudget } from "@/lib/org";
 import { isOrgFrozen } from "@/lib/org/freeze";
@@ -102,6 +105,11 @@ async function OrgConsoleContent() {
             Spend grid and audit export →
           </Link>
         )}
+        {getEnv().DEMO_MODE && (
+          <div className="pt-2">
+            <SimulateToggle />
+          </div>
+        )}
       </header>
 
       <section aria-label="Org budget" className="grid gap-6 sm:grid-cols-3">
@@ -129,6 +137,8 @@ async function OrgConsoleContent() {
       </section>
 
       {canEdit && <AlertsPanel />}
+
+      <CallFeed side="buyer" />
 
       <section aria-label="Teams and agents" className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
